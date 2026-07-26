@@ -1,8 +1,9 @@
 # BTicino C100X for Home Assistant
 
 A native Home Assistant integration for BTicino Classe 100X door-entry units
-running firmware 1.x. It uses Legrand cloud authentication and the door-entry
-SIP service without modifying the intercom firmware.
+running firmware 1.x. It uses Legrand's Door Entry cloud command service for
+door releases and SIP for real-time ringing, without modifying the intercom
+firmware.
 
 ## Beta scope
 
@@ -27,12 +28,11 @@ issues or diagnostic logs.
 ## Safety
 
 This is an unofficial integration. Test the beta with the entrance mechanically
-locked. Home Assistant reports an unlock as successful only after the SIP server
-returns a successful response.
+locked. Home Assistant reports an unlock as successful only after Legrand's
+Door Entry cloud service accepts the command.
 
 ## Attribution
 
 Protocol behavior was independently implemented with reference to the MIT
 licensed projects `adaofeliz/bticino-door-entry-v1` and
 `s-dimaio/BTicinoDoorEntry`.
-
