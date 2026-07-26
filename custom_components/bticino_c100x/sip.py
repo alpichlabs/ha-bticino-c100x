@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import secrets
 import ssl
 from collections.abc import Awaitable, Callable
@@ -183,20 +182,6 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"SIP registration failed with status {response.status_code}")
         self.registered = True
-
-    async def open_gate(self, gate_id: str) -> None:
-        payload = json.dumps(
-            {
-                "id": str(secrets.randbelow(100_000_000)),
-                "jsonrpc": "2.0",
-                "method": "lock.setStatus",
-                "params": [{"receiver": {"plant": {"coal": {"id": gate_id}, "id": None}}, "status": "open"}],
-            },
-            separators=(",", ":"),
-        ).encode()
-        response = await self._authenticated_request("MESSAGE", f"sip:diy@{self.account.domain}", payload)
-        if response.status_code != 200:
-            raise SipError(f"Door release failed with status {response.status_code}")
 
     async def _authenticated_request(self, method: str, uri: str, body: bytes, register: bool = False) -> SipMessage:
         async with self._send_lock:

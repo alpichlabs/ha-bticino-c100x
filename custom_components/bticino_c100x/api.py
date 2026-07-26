@@ -61,6 +61,14 @@ class LegrandApi:
         modules = value if isinstance(value, list) else value.get("modules", value.get("value", []))
         return [module for module in modules if module.get("plantId", module.get("plant_id")) == plant_id]
 
+    async def open_lock(self, gateway_id: str, lock_id: str) -> None:
+        """Release a connected lock through the official Door Entry cloud command."""
+        await self._request(
+            "POST",
+            f"/devicemanagement/api/v2.0/modules/{gateway_id}/commands",
+            {"command": {"name": "open", "moduleId": lock_id}},
+        )
+
     async def sip_accounts(self, gateway_id: str) -> list[SipAccount]:
         value = await self._request("GET", f"/vde/sip/v1.0/devices/{gateway_id}/sipaccounts")
         return [SipAccount.from_api(item) for item in value]
@@ -77,4 +85,3 @@ class LegrandApi:
 
     async def provision_certificate(self, request: dict) -> dict:
         return await self._request("POST", "/certificate/api/v1.0/ca/information/clientCerts", request)
-

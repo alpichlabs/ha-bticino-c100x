@@ -35,9 +35,5 @@ class C100XLock(C100XEntity, LockEntity):
     def is_locked(self) -> bool:
         return True
 
-    @property
-    def available(self) -> bool:
-        return self.manager.registered
-
     async def async_unlock(self, **kwargs: Any) -> None:
         await self.manager.async_open(self._lock_id)

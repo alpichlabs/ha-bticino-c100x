@@ -84,9 +84,7 @@ class C100XManager:
         self.registered = False
 
     async def async_open(self, lock_id: str) -> None:
-        if not self._client or not self.registered:
-            raise SipError("Door Entry SIP service is not registered")
-        await self._client.open_gate(lock_id)
+        await self.api.open_lock(self.entry.data[CONF_GATEWAY_ID], lock_id)
 
     @callback
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
