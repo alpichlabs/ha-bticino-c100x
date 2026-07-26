@@ -20,6 +20,15 @@ def test_framer_handles_multiple_messages() -> None:
     assert [message.status_code for message in messages] == [200, 200]
 
 
+def test_provisional_response_is_identified_before_final_response() -> None:
+    raw = (
+        b"SIP/2.0 100 Trying\r\nCall-ID: abc\r\nCSeq: 2 MESSAGE\r\nContent-Length: 0\r\n\r\n"
+        b"SIP/2.0 200 OK\r\nCall-ID: abc\r\nCSeq: 2 MESSAGE\r\nContent-Length: 0\r\n\r\n"
+    )
+    messages = SipFramer().feed(raw)
+    assert [message.status_code for message in messages] == [100, 200]
+
+
 def test_digest_matches_rfc_example(monkeypatch) -> None:
     monkeypatch.setattr("custom_components.bticino_c100x.sip.secrets.token_hex", lambda _: "0a4f113b")
     account = SipAccount("1", "Mufasa@testrealm@host.com", "Circle Of Life", "oid")

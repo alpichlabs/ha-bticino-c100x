@@ -266,7 +266,9 @@ class SipClient:
             for message in framer.feed(data):
                 if message.status_code is not None:
                     key = (message.headers.get("call-id", ""), message.headers.get("cseq", ""))
-                    if (future := self._pending.get(key)) and not future.done():
+                    # SIP 1xx messages (notably 100 Trying) are provisional.
+                    # Keep waiting for the final authentication or success response.
+                    if message.status_code >= 200 and (future := self._pending.get(key)) and not future.done():
                         future.set_result(message)
                 else:
                     await self._handle_request(message)
