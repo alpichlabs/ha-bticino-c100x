@@ -10,13 +10,18 @@
         "title": "Select installation",
         "data": {"home_id": "Installation"}
       },
+      "locks": {
+        "title": "Select connected door releases",
+        "description": "Select every physical lock that is still connected to this installation.",
+        "data": {"lock_ids": "Door releases"}
+      },
       "reauth_confirm": {
         "title": "Reconnect BTicino Door Entry",
         "description": "Enter the current Door Entry account password.",
         "data": {"password": "Password"}
       }
     },
-    "error": {"cannot_connect": "Cannot connect to Legrand", "invalid_auth": "Invalid credentials"},
+    "error": {"cannot_connect": "Cannot connect to Legrand", "invalid_auth": "Invalid credentials", "select_lock": "Select at least one connected door release"},
     "abort": {
       "already_configured": "This account is already configured",
       "cannot_connect": "Cannot load the installation",
@@ -24,5 +29,16 @@
       "reauth_successful": "Authentication was updated",
       "unsupported_installation": "No compatible gateway and door lock were found"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connected door releases",
+        "description": "Keep all physical locks that are still connected and deselect stale outputs.",
+        "data": {"lock_ids": "Door releases"}
+      }
+    },
+    "error": {"select_lock": "Select at least one connected door release"},
+    "abort": {"cannot_connect": "Cannot load door releases from Legrand"}
   }
 }

@@ -28,6 +28,7 @@ type C100XConfigEntry = ConfigEntry[RuntimeData]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: C100XConfigEntry) -> bool:
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar())
     token_store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.tokens.{entry.entry_id}")
 
@@ -53,6 +54,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: C100XConfigEntry) -> boo
     entry.runtime_data = RuntimeData(manager)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: C100XConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: C100XConfigEntry) -> bool:

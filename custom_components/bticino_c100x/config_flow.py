@@ -8,6 +8,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import ApiError, LegrandApi
@@ -18,6 +19,10 @@ from .const import CONF_GATEWAY_ID, CONF_HOME_ID, CONF_LOCK_IDS, DOMAIN
 class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return C100XOptionsFlow()
+
     def __init__(self) -> None:
         self._credentials: dict[str, str] = {}
         self._plants: list[dict] = []
@@ -26,9 +31,7 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({vol.Required(CONF_USERNAME): str, vol.Required(CONF_PASSWORD): str})
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=schema)
-        session = async_create_clientsession(
-            self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar()
-        )
+        session = async_create_clientsession(self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
         auth = C100XAuth(session, user_input[CONF_USERNAME], user_input[CONF_PASSWORD])
         try:
             await auth.authenticate()
@@ -56,9 +59,7 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self._finish(user_input[CONF_HOME_ID])
 
     async def _finish(self, home_id: str) -> config_entries.ConfigFlowResult:
-        session = async_create_clientsession(
-            self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar()
-        )
+        session = async_create_clientsession(self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
         auth = C100XAuth(session, self._credentials[CONF_USERNAME], self._credentials[CONF_PASSWORD])
         api = LegrandApi(session, auth)
         try:
@@ -68,17 +69,33 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         finally:
             session.detach()
         gateway = next((module for module in modules if module.get("device") == "gateway"), None)
-        lock_ids = [module["id"] for module in modules if module.get("device") == "lock"]
-        if not gateway or not lock_ids:
+        locks = [module for module in modules if module.get("device") == "lock"]
+        if not gateway or not locks:
             return self.async_abort(reason="unsupported_installation")
-        plant = next(plant for plant in self._plants if plant["id"] == home_id)
+        self._home_id = home_id
+        self._gateway_id = gateway["id"]
+        self._lock_choices = _lock_choices(locks)
+        return await self.async_step_locks()
+
+    async def async_step_locks(self, user_input=None):
+        if user_input is None:
+            schema = vol.Schema({vol.Required(CONF_LOCK_IDS): _lock_selector(self._lock_choices)})
+            return self.async_show_form(step_id="locks", data_schema=schema)
+        selected = user_input[CONF_LOCK_IDS]
+        if not selected:
+            return self.async_show_form(
+                step_id="locks",
+                data_schema=vol.Schema({vol.Required(CONF_LOCK_IDS): _lock_selector(self._lock_choices)}),
+                errors={"base": "select_lock"},
+            )
+        plant = next(plant for plant in self._plants if plant["id"] == self._home_id)
         return self.async_create_entry(
             title=plant.get("name", "BTicino C100X"),
             data={
                 **self._credentials,
-                CONF_HOME_ID: home_id,
-                CONF_GATEWAY_ID: gateway["id"],
-                CONF_LOCK_IDS: lock_ids,
+                CONF_HOME_ID: self._home_id,
+                CONF_GATEWAY_ID: self._gateway_id,
+                CONF_LOCK_IDS: selected,
             },
         )
 
@@ -94,20 +111,14 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({vol.Required(CONF_PASSWORD): str})
         if user_input is None:
             return self.async_show_form(step_id="reauth_confirm", data_schema=schema)
-        session = async_create_clientsession(
-            self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar()
-        )
+        session = async_create_clientsession(self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
         auth = C100XAuth(session, entry.data[CONF_USERNAME], user_input[CONF_PASSWORD])
         try:
             await auth.authenticate()
         except AuthenticationError:
-            return self.async_show_form(
-                step_id="reauth_confirm", data_schema=schema, errors={"base": "invalid_auth"}
-            )
+            return self.async_show_form(step_id="reauth_confirm", data_schema=schema, errors={"base": "invalid_auth"})
         except OSError:
-            return self.async_show_form(
-                step_id="reauth_confirm", data_schema=schema, errors={"base": "cannot_connect"}
-            )
+            return self.async_show_form(step_id="reauth_confirm", data_schema=schema, errors={"base": "cannot_connect"})
         finally:
             session.detach()
         self.hass.config_entries.async_update_entry(
@@ -115,3 +126,38 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         await self.hass.config_entries.async_reload(entry.entry_id)
         return self.async_abort(reason="reauth_successful")
+
+
+class C100XOptionsFlow(config_entries.OptionsFlow):
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            if not user_input[CONF_LOCK_IDS]:
+                return self.async_show_form(step_id="init", data_schema=self._schema(), errors={"base": "select_lock"})
+            return self.async_create_entry(data={CONF_LOCK_IDS: user_input[CONF_LOCK_IDS]})
+        session = async_create_clientsession(self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
+        try:
+            auth = C100XAuth(session, self.config_entry.data[CONF_USERNAME], self.config_entry.data[CONF_PASSWORD])
+            modules = await LegrandApi(session, auth).modules(self.config_entry.data[CONF_HOME_ID])
+        except (AuthenticationError, ApiError, OSError):
+            return self.async_abort(reason="cannot_connect")
+        finally:
+            session.detach()
+        self._choices = _lock_choices([module for module in modules if module.get("device") == "lock"])
+        return self.async_show_form(step_id="init", data_schema=self._schema())
+
+    def _schema(self):
+        current = self.config_entry.options.get(CONF_LOCK_IDS, self.config_entry.data[CONF_LOCK_IDS])
+        return vol.Schema({vol.Required(CONF_LOCK_IDS, default=current): _lock_selector(self._choices)})
+
+
+def _lock_choices(modules):
+    return {module["id"]: module.get("name") or f"Door {index}" for index, module in enumerate(modules, 1)}
+
+
+def _lock_selector(choices):
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[selector.SelectOptionDict(value=value, label=label) for value, label in choices.items()],
+            multiple=True,
+        )
+    )

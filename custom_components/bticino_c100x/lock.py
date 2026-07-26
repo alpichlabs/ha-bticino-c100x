@@ -11,11 +11,8 @@ from .entity import C100XEntity
 
 
 async def async_setup_entry(entry_hass, entry: C100XConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    lock_ids = entry.data[CONF_LOCK_IDS]
-    # Classe 100X exposes one physical door release. Some Legrand plants
-    # nevertheless return duplicate/stale lock modules for the same gateway;
-    # only the primary module should become an actionable Home Assistant entity.
-    async_add_entities([C100XLock(entry, lock_ids[0])] if lock_ids else [])
+    lock_ids = entry.options.get(CONF_LOCK_IDS, entry.data[CONF_LOCK_IDS])
+    async_add_entities(C100XLock(entry, lock_id) for lock_id in lock_ids)
 
 
 class C100XLock(C100XEntity, LockEntity):
