@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches manifest
+        shell: python
+        run: |
+          import json
+          import os
+          version = json.load(open("custom_components/bticino_c100x/manifest.json"))["version"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          if version != tag:
+              raise SystemExit(f"manifest version {version!r} does not match tag {tag!r}")
+      - name: Build HACS archive
+        run: cd custom_components/bticino_c100x && zip -r ../../../bticino_c100x.zip .
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: bticino_c100x.zip
+

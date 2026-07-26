@@ -1,0 +1,19 @@
+[project]
+name = "ha-bticino-c100x"
+version = "0.1.0b1"
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "LOG", "RUF", "SIM", "UP", "W"]
+
+[tool.coverage.run]
+source = ["custom_components/bticino_c100x"]
+

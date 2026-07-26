@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to BTicino Door Entry",
+        "description": "Enter the credentials used by the official Door Entry app.",
+        "data": {"username": "Email", "password": "Password"}
+      },
+      "home": {
+        "title": "Select installation",
+        "data": {"home_id": "Installation"}
+      },
+      "reauth_confirm": {
+        "title": "Reconnect BTicino Door Entry",
+        "description": "Enter the current Door Entry account password.",
+        "data": {"password": "Password"}
+      }
+    },
+    "error": {"cannot_connect": "Cannot connect to Legrand", "invalid_auth": "Invalid credentials"},
+    "abort": {
+      "already_configured": "This account is already configured",
+      "cannot_connect": "Cannot load the installation",
+      "no_homes": "No Door Entry installation was found",
+      "reauth_successful": "Authentication was updated",
+      "unsupported_installation": "No compatible gateway and door lock were found"
+    }
+  }
+}

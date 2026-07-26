@@ -1,0 +1,80 @@
+"""Legrand cloud API client."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+import aiohttp
+
+from .auth import C100XAuth
+from .const import API_BASE, API_SUBSCRIPTION_KEY
+from .models import SipAccount
+
+
+class ApiError(Exception):
+    """A sanitized Legrand API error."""
+
+    def __init__(self, status: int, operation: str) -> None:
+        super().__init__(f"Legrand API {operation} failed with HTTP {status}")
+        self.status = status
+
+
+class LegrandApi:
+    """Small API surface required by the integration."""
+
+    def __init__(self, session: aiohttp.ClientSession, auth: C100XAuth) -> None:
+        self._session = session
+        self._auth = auth
+
+    async def _request(self, method: str, path: str, payload: dict | None = None) -> Any:
+        for attempt in range(3):
+            token = await self._auth.access_token()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "UserToken": token,
+                "Ocp-Apim-Subscription-Key": API_SUBSCRIPTION_KEY,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+            async with self._session.request(method, f"{API_BASE}{path}", headers=headers, json=payload) as response:
+                if response.status >= 500 and attempt < 2:
+                    await asyncio.sleep(2**attempt)
+                    continue
+                if response.status >= 400:
+                    raise ApiError(response.status, f"{method} {path}")
+                if response.status == 204:
+                    return None
+                return await response.json(content_type=None)
+        raise ApiError(503, f"{method} {path}")
+
+    async def plants(self) -> list[dict]:
+        value = await self._request("GET", "/servicecatalog/api/v3.0/plants")
+        return value if isinstance(value, list) else value.get("plants", value.get("value", []))
+
+    async def plant(self, plant_id: str) -> dict:
+        value = await self._request("GET", f"/servicecatalog/api/v3.0/plants/{plant_id}")
+        return value.get("plant", value)
+
+    async def modules(self, plant_id: str) -> list[dict]:
+        value = await self._request("GET", "/servicecatalog/api/v3.0/modules")
+        modules = value if isinstance(value, list) else value.get("modules", value.get("value", []))
+        return [module for module in modules if module.get("plantId", module.get("plant_id")) == plant_id]
+
+    async def sip_accounts(self, gateway_id: str) -> list[SipAccount]:
+        value = await self._request("GET", f"/vde/sip/v1.0/devices/{gateway_id}/sipaccounts")
+        return [SipAccount.from_api(item) for item in value]
+
+    async def register_sip_account(self, gateway_id: str, client_id: str) -> SipAccount:
+        user_oid = await self._auth.user_oid()
+        sip_uri = f"{user_oid}_{client_id}@{gateway_id}.bs.iotleg.com"
+        value = await self._request(
+            "POST",
+            f"/vde/sip/v1.0/devices/{gateway_id}/sipaccount",
+            {"clientId": client_id, "clientName": "Home Assistant", "sipUri": sip_uri},
+        )
+        return SipAccount.from_api(value)
+
+    async def provision_certificate(self, request: dict) -> dict:
+        return await self._request("POST", "/certificate/api/v1.0/ca/information/clientCerts", request)
+

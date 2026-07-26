@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible integration problem
+body:
+  - type: markdown
+    attributes:
+      value: Never paste account credentials, tokens, SIP passwords, certificates, or private keys.
+  - type: input
+    id: version
+    attributes:
+      label: Integration version
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Intercom model and firmware
+      placeholder: Classe 100X, firmware 1.5.8
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      description: Use Home Assistant diagnostics and verify that no private information remains.
+
