@@ -69,6 +69,19 @@ class SipFramer:
         return messages
 
 
+def _create_ssl_context(certificate_path: str, private_key_path: str) -> ssl.SSLContext:
+    """Create the SIP TLS context outside Home Assistant's event loop."""
+    context = ssl.create_default_context()
+    # The dedicated Legrand SIP endpoint uses a private, self-signed server
+    # certificate chain. Limit relaxed verification to this single pinned
+    # hostname; mutual TLS still authenticates this client with the
+    # short-lived certificate provisioned by Legrand.
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.load_cert_chain(certificate_path, private_key_path)
+    return context
+
+
 def parse_digest_challenge(value: str) -> dict[str, str]:
     """Parse a Digest challenge without logging it."""
     value = value.removeprefix("Digest ")
@@ -133,14 +146,9 @@ class SipClient:
         self.registered = False
 
     async def connect(self) -> None:
-        context = ssl.create_default_context()
-        # The dedicated Legrand SIP endpoint uses a private, self-signed server
-        # certificate chain. Limit relaxed verification to this single pinned
-        # hostname; mutual TLS still authenticates this client with the
-        # short-lived certificate provisioned by Legrand.
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        context.load_cert_chain(self._certificate_path, self._private_key_path)
+        context = await asyncio.to_thread(
+            _create_ssl_context, self._certificate_path, self._private_key_path
+        )
         self._reader, self._writer = await asyncio.open_connection(
             SIP_SERVER, SIP_PORT, ssl=context, server_hostname=SIP_SERVER
         )
