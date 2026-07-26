@@ -34,7 +34,7 @@ async def test_sip_accounts_use_required_headers() -> None:
     assert request.kwargs["headers"]["UserToken"] == "token-value"
 
 
-async def test_open_lock_uses_gateway_command_endpoint_and_module_id() -> None:
+async def test_release_door_uses_gateway_command_endpoint_and_module_id() -> None:
     auth = AsyncMock()
     auth.access_token.return_value = "token-value"
     async with aiohttp.ClientSession() as session:
@@ -42,7 +42,7 @@ async def test_open_lock_uses_gateway_command_endpoint_and_module_id() -> None:
         url = f"{API_BASE}/devicemanagement/api/v2.0/modules/gateway/commands"
         with aioresponses() as mocked:
             mocked.post(url, payload={})
-            await api.open_lock("gateway", "lock-module")
+            await api.release_door("gateway", "lock-module")
             request = next(iter(mocked.requests.values()))[0]
 
     assert request.kwargs["json"] == {"command": {"name": "open", "moduleId": "lock-module"}}

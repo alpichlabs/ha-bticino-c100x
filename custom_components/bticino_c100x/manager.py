@@ -83,8 +83,8 @@ class C100XManager:
             self._client = None
         self.registered = False
 
-    async def async_open(self, lock_id: str) -> None:
-        await self.api.open_lock(self.entry.data[CONF_GATEWAY_ID], lock_id)
+    async def async_release(self, lock_id: str) -> None:
+        await self.api.release_door(self.entry.data[CONF_GATEWAY_ID], lock_id)
 
     @callback
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:

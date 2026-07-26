@@ -61,8 +61,8 @@ class LegrandApi:
         modules = value if isinstance(value, list) else value.get("modules", value.get("value", []))
         return [module for module in modules if module.get("plantId", module.get("plant_id")) == plant_id]
 
-    async def open_lock(self, gateway_id: str, lock_id: str) -> None:
-        """Release a connected lock through the official Door Entry cloud command."""
+    async def release_door(self, gateway_id: str, lock_id: str) -> None:
+        """Pulse a connected electric strike through the Door Entry cloud."""
         await self._request(
             "POST",
             f"/devicemanagement/api/v2.0/modules/{gateway_id}/commands",

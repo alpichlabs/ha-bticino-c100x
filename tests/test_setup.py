@@ -31,8 +31,9 @@ async def test_entry_creates_only_requested_entities(hass, enable_custom_integra
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert hass.states.get("lock.front_entrance_door") is not None
-    assert len(hass.states.async_entity_ids("lock")) == 3
+    assert hass.states.get("button.front_entrance_release_door") is not None
+    assert len(hass.states.async_entity_ids("button")) == 3
+    assert not hass.states.async_entity_ids("lock")
     assert hass.states.get("binary_sensor.front_entrance_ringing") is not None
     assert hass.states.get("event.front_entrance_doorbell") is not None
     assert hass.states.get("sensor.front_entrance_sip_registration") is not None

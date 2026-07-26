@@ -2,12 +2,12 @@
 
 A native Home Assistant integration for BTicino Classe 100X door-entry units
 running firmware 1.x. It uses Legrand's Door Entry cloud command service for
-door releases and SIP for real-time ringing, without modifying the intercom
+momentary electric-strike releases and SIP for real-time ringing, without modifying the intercom
 firmware.
 
 ## Beta scope
 
-- Unlock the door at any time from Home Assistant
+- Pulse the door release at any time from Home Assistant
 - Receive real-time doorbell events
 - Use doorbell events in automations and Companion App notifications
 - Keep the official Door Entry app operational through a separate SIP account
@@ -28,8 +28,9 @@ issues or diagnostic logs.
 ## Safety
 
 This is an unofficial integration. Test the beta with the entrance mechanically
-locked. Home Assistant reports an unlock as successful only after Legrand's
-Door Entry cloud service accepts the command.
+locked. The **Release door** button only pulses the electric strike for its
+configured interval; it does not represent a stateful smart lock or report
+whether the physical door is open.
 
 ## Attribution
 
