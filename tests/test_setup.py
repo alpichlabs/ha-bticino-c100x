@@ -21,7 +21,7 @@ async def test_entry_creates_only_requested_entities(hass, enable_custom_integra
             "password": "secret",
             CONF_HOME_ID: "home",
             CONF_GATEWAY_ID: "gateway",
-            CONF_LOCK_IDS: ["door"],
+            CONF_LOCK_IDS: ["door", "duplicate-door", "stale-door"],
         },
         unique_id="person@example.com",
     )
@@ -34,6 +34,7 @@ async def test_entry_creates_only_requested_entities(hass, enable_custom_integra
         await hass.async_block_till_done()
 
     assert hass.states.get("lock.front_entrance_door") is not None
+    assert len(hass.states.async_entity_ids("lock")) == 1
     assert hass.states.get("binary_sensor.front_entrance_ringing") is not None
     assert hass.states.get("event.front_entrance_doorbell") is not None
     assert hass.states.get("sensor.front_entrance_sip_registration") is not None
