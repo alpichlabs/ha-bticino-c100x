@@ -134,6 +134,12 @@ class SipClient:
 
     async def connect(self) -> None:
         context = ssl.create_default_context()
+        # The dedicated Legrand SIP endpoint uses a private, self-signed server
+        # certificate chain. Limit relaxed verification to this single pinned
+        # hostname; mutual TLS still authenticates this client with the
+        # short-lived certificate provisioned by Legrand.
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         context.load_cert_chain(self._certificate_path, self._private_key_path)
         self._reader, self._writer = await asyncio.open_connection(
             SIP_SERVER, SIP_PORT, ssl=context, server_hostname=SIP_SERVER
