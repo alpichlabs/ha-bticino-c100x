@@ -80,15 +80,6 @@ class LegrandApi:
         value = await self._request("GET", f"/servicecatalog/api/v3.0/plants/{plant_id}/modules")
         return value if isinstance(value, list) else value.get("modules", value.get("value", []))
 
-    async def release_door(self, gateway_id: str, lock_id: str) -> None:
-        """Pulse a connected electric strike through the Door Entry cloud."""
-        await self._request(
-            "POST",
-            f"/devicemanagement/api/v2.0/modules/{gateway_id}/commands",
-            {"command": {"name": "open", "moduleId": lock_id}},
-            diagnostic_label="Door release command",
-        )
-
     async def sip_accounts(self, gateway_id: str) -> list[SipAccount]:
         value = await self._request("GET", f"/vde/sip/v1.0/devices/{gateway_id}/sipaccounts")
         return [SipAccount.from_api(item) for item in value]

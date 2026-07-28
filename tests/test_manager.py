@@ -31,7 +31,7 @@ async def test_ring_is_deduplicated_and_fired_on_bus(hass) -> None:
     manager._clear_ring()
 
 
-async def test_release_uses_cloud_command_even_when_sip_is_disconnected(hass) -> None:
+async def test_release_uses_module_id_over_registered_sip(hass) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_GATEWAY_ID: "gateway", CONF_HOME_ID: "home"},
@@ -40,7 +40,9 @@ async def test_release_uses_cloud_command_even_when_sip_is_disconnected(hass) ->
     entry.add_to_hass(hass)
     api = AsyncMock()
     manager = C100XManager(hass, entry, AsyncMock(), api)
+    manager._client = AsyncMock()
+    manager._client.registered = True
 
     await manager.async_release("lock-module")
 
-    api.release_door.assert_awaited_once_with("gateway", "lock-module")
+    manager._client.release_door.assert_awaited_once_with("lock-module")

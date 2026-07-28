@@ -84,7 +84,9 @@ class C100XManager:
         self.registered = False
 
     async def async_release(self, lock_id: str) -> None:
-        await self.api.release_door(self.entry.data[CONF_GATEWAY_ID], lock_id)
+        if not self._client or not self._client.registered:
+            raise SipError("Door release is unavailable while SIP is disconnected")
+        await self._client.release_door(lock_id)
 
     @callback
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:

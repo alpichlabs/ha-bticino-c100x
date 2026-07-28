@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import secrets
 import ssl
 from collections.abc import Awaitable, Callable
@@ -190,6 +191,27 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"SIP registration failed with status {response.status_code}")
         self.registered = True
+
+    async def release_door(self, lock_id: str) -> None:
+        """Release a Classe 100X strike using its topology module ID."""
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": str(secrets.randbelow(2**31)),
+                "method": "lock.setStatus",
+                "params": [
+                    {
+                        "status": "open",
+                        "receiver": {"plant": {"coal": {"id": lock_id}}},
+                    }
+                ],
+            },
+            separators=(",", ":"),
+        ).encode()
+        uri = f"sip:c100x@{self.account.domain}"
+        response = await self._authenticated_request("MESSAGE", uri, body)
+        if response.status_code != 200:
+            raise SipError(f"Door release failed with SIP status {response.status_code}")
 
     async def _authenticated_request(self, method: str, uri: str, body: bytes, register: bool = False) -> SipMessage:
         async with self._send_lock:
