@@ -9,6 +9,19 @@ from custom_components.bticino_c100x.api import LegrandApi
 from custom_components.bticino_c100x.const import API_BASE, API_SUBSCRIPTION_KEY
 
 
+async def test_modules_use_plant_specific_catalog_endpoint() -> None:
+    auth = AsyncMock()
+    auth.access_token.return_value = "token-value"
+    async with aiohttp.ClientSession() as session:
+        api = LegrandApi(session, auth)
+        url = f"{API_BASE}/servicecatalog/api/v3.0/plants/home/modules"
+        with aioresponses() as mocked:
+            mocked.get(url, payload=[{"id": "lock-module", "device": "lock"}])
+            modules = await api.modules("home")
+
+    assert modules == [{"id": "lock-module", "device": "lock"}]
+
+
 async def test_sip_accounts_use_required_headers() -> None:
     auth = AsyncMock()
     auth.access_token.return_value = "token-value"

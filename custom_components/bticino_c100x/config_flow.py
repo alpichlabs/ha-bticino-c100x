@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import aiohttp
@@ -153,7 +154,28 @@ class C100XOptionsFlow(config_entries.OptionsFlow):
 
 
 def _lock_choices(modules):
-    return {module["id"]: module.get("name") or f"Door {index}" for index, module in enumerate(modules, 1)}
+    return {module["id"]: _lock_label(module, index) for index, module in enumerate(modules, 1)}
+
+
+def _lock_label(module: dict, index: int) -> str:
+    """Build a useful, non-sensitive label for a release module."""
+    name = str(module.get("name") or "").strip()
+    details: list[str] = []
+    for tag in module.get("tags", []):
+        if tag.get("key") != "PrivateAddress":
+            continue
+        try:
+            address = json.loads(tag.get("value", "{}"))
+        except (TypeError, ValueError):
+            continue
+        values = address.get("addressValues", [])
+        if open_address := next((item.get("value") for item in values if item.get("name") == "address"), None):
+            details.append(f"address {open_address}")
+        if button_id := address.get("buttonId"):
+            details.append(f"button {button_id}")
+        break
+    label = name or f"Door {index}"
+    return f"{label} ({', '.join(details)})" if details else label
 
 
 def _lock_selector(choices):

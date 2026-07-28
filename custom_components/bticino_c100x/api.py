@@ -57,9 +57,8 @@ class LegrandApi:
         return value.get("plant", value)
 
     async def modules(self, plant_id: str) -> list[dict]:
-        value = await self._request("GET", "/servicecatalog/api/v3.0/modules")
-        modules = value if isinstance(value, list) else value.get("modules", value.get("value", []))
-        return [module for module in modules if module.get("plantId", module.get("plant_id")) == plant_id]
+        value = await self._request("GET", f"/servicecatalog/api/v3.0/plants/{plant_id}/modules")
+        return value if isinstance(value, list) else value.get("modules", value.get("value", []))
 
     async def release_door(self, gateway_id: str, lock_id: str) -> None:
         """Pulse a connected electric strike through the Door Entry cloud."""
