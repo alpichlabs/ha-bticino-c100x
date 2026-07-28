@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import secrets
 import ssl
@@ -159,9 +160,16 @@ class SipClient:
         if self._read_task:
             self._read_task.cancel()
             await asyncio.gather(self._read_task, return_exceptions=True)
+            self._read_task = None
         if self._writer:
             self._writer.close()
-            await self._writer.wait_closed()
+            # TLS peers can close first or abort the shutdown handshake. The
+            # connection is already unusable at this point, so teardown must
+            # not prevent Home Assistant from unloading/reloading the entry.
+            with contextlib.suppress(OSError, ssl.SSLError):
+                await self._writer.wait_closed()
+            self._writer = None
+            self._reader = None
         for task in self._background_tasks:
             task.cancel()
         await asyncio.gather(*self._background_tasks, return_exceptions=True)

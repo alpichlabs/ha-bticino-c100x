@@ -1,7 +1,9 @@
 """SIP protocol unit tests."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 from custom_components.bticino_c100x.models import SipAccount
-from custom_components.bticino_c100x.sip import SipFramer, digest_authorization, parse_digest_challenge
+from custom_components.bticino_c100x.sip import SipClient, SipFramer, digest_authorization, parse_digest_challenge
 
 
 def test_framer_handles_fragmented_body() -> None:
@@ -37,3 +39,16 @@ def test_digest_matches_rfc_example(monkeypatch) -> None:
     )
     value = digest_authorization(account=account, method="GET", uri="/dir/index.html", challenge=challenge)
     assert 'response="6629fae49393a05397450978507c4ef1"' in value
+
+
+async def test_close_ignores_tls_shutdown_failure() -> None:
+    account = SipAccount("1", "user@example.com", "secret", "oid")
+    client = SipClient(account, "certificate", "key", AsyncMock())
+    writer = MagicMock()
+    writer.wait_closed = AsyncMock(side_effect=OSError("TLS peer closed first"))
+    client._writer = writer
+
+    await client.close()
+
+    writer.close.assert_called_once_with()
+    assert client._writer is None
