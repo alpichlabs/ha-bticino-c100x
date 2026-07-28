@@ -161,6 +161,7 @@ def _lock_label(module: dict, index: int) -> str:
     """Build a useful, non-sensitive label for a release module."""
     name = str(module.get("name") or "").strip()
     details: list[str] = []
+    button_id: str | None = None
     for tag in module.get("tags", []):
         if tag.get("key") != "PrivateAddress":
             continue
@@ -172,9 +173,19 @@ def _lock_label(module: dict, index: int) -> str:
         if open_address := next((item.get("value") for item in values if item.get("name") == "address"), None):
             details.append(f"address {open_address}")
         if button_id := address.get("buttonId"):
+            button_id = str(button_id)
             details.append(f"button {button_id}")
         break
-    label = name or f"Door {index}"
+    # On Classe 100X, control 6 is the dedicated door-lock release key;
+    # control 5 belongs to the configurable-key group and may legitimately
+    # target an additional lock. Keep every module selectable because a real
+    # installation can contain more than one strike.
+    if button_id == "6":
+        label = "Main door release"
+    elif button_id == "5":
+        label = name or "Programmable door release"
+    else:
+        label = name or f"Door release {index}"
     return f"{label} ({', '.join(details)})" if details else label
 
 
