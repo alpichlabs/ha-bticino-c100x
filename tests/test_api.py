@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import aiohttp
 from aioresponses import aioresponses
 
-from custom_components.bticino_c100x.api import LegrandApi
+from custom_components.bticino_c100x.api import LegrandApi, _response_summary
 from custom_components.bticino_c100x.const import API_BASE, API_SUBSCRIPTION_KEY
 
 
@@ -59,3 +59,13 @@ async def test_release_door_uses_gateway_command_endpoint_and_module_id() -> Non
             request = next(iter(mocked.requests.values()))[0]
 
     assert request.kwargs["json"] == {"command": {"name": "open", "moduleId": "lock-module"}}
+
+
+def test_response_summary_never_contains_values() -> None:
+    value = {"operationId": "private-id", "status": "accepted"}
+
+    summary = _response_summary(value)
+
+    assert summary == "object with keys [operationId, status]"
+    assert "private-id" not in summary
+    assert "accepted" not in summary

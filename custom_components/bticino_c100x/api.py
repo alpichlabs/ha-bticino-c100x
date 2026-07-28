@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import aiohttp
@@ -10,6 +11,8 @@ import aiohttp
 from .auth import C100XAuth
 from .const import API_BASE, API_SUBSCRIPTION_KEY
 from .models import SipAccount
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -27,7 +30,14 @@ class LegrandApi:
         self._session = session
         self._auth = auth
 
-    async def _request(self, method: str, path: str, payload: dict | None = None) -> Any:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        diagnostic_label: str | None = None,
+    ) -> Any:
         for attempt in range(3):
             token = await self._auth.access_token()
             headers = {
@@ -44,8 +54,18 @@ class LegrandApi:
                 if response.status >= 400:
                     raise ApiError(response.status, f"{method} {path}")
                 if response.status == 204:
+                    if diagnostic_label:
+                        _LOGGER.debug("%s accepted: HTTP 204, empty response", diagnostic_label)
                     return None
-                return await response.json(content_type=None)
+                value = await response.json(content_type=None)
+                if diagnostic_label:
+                    _LOGGER.debug(
+                        "%s accepted: HTTP %s, response %s",
+                        diagnostic_label,
+                        response.status,
+                        _response_summary(value),
+                    )
+                return value
         raise ApiError(503, f"{method} {path}")
 
     async def plants(self) -> list[dict]:
@@ -66,6 +86,7 @@ class LegrandApi:
             "POST",
             f"/devicemanagement/api/v2.0/modules/{gateway_id}/commands",
             {"command": {"name": "open", "moduleId": lock_id}},
+            diagnostic_label="Door release command",
         )
 
     async def sip_accounts(self, gateway_id: str) -> list[SipAccount]:
@@ -84,3 +105,15 @@ class LegrandApi:
 
     async def provision_certificate(self, request: dict) -> dict:
         return await self._request("POST", "/certificate/api/v1.0/ca/information/clientCerts", request)
+
+
+def _response_summary(value: Any) -> str:
+    """Describe a response without logging values or installation identifiers."""
+    if isinstance(value, dict):
+        keys = ", ".join(sorted(str(key) for key in value))
+        return f"object with keys [{keys}]" if keys else "empty object"
+    if isinstance(value, list):
+        return f"list with {len(value)} item(s)"
+    if value is None:
+        return "null"
+    return type(value).__name__
