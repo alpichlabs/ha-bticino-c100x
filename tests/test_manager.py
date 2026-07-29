@@ -45,4 +45,4 @@ async def test_release_uses_module_id_over_registered_sip(hass) -> None:
 
     await manager.async_release("lock-module")
 
-    manager._client.release_door.assert_awaited_once_with("lock-module")
+    manager._client.release_door.assert_awaited_once_with("lock-module", "gateway")

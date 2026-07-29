@@ -192,7 +192,7 @@ class SipClient:
             raise SipError(f"SIP registration failed with status {response.status_code}")
         self.registered = True
 
-    async def release_door(self, lock_id: str) -> None:
+    async def release_door(self, lock_id: str, gateway_id: str) -> None:
         """Release a Classe 100X strike using its topology module ID."""
         body = json.dumps(
             {
@@ -208,7 +208,12 @@ class SipClient:
             },
             separators=(",", ":"),
         ).encode()
-        uri = f"sip:c100x@{self.account.domain}"
+        gateway_domain = (
+            gateway_id
+            if gateway_id.endswith(".bs.iotleg.com")
+            else f"{gateway_id}.bs.iotleg.com"
+        )
+        uri = f"sip:c100x@{gateway_domain}"
         response = await self._authenticated_request("MESSAGE", uri, body)
         if response.status_code != 200:
             raise SipError(f"Door release failed with SIP status {response.status_code}")

@@ -63,16 +63,16 @@ async def test_close_ignores_tls_shutdown_failure() -> None:
 
 async def test_release_door_matches_classe_100x_json_rpc_message(monkeypatch) -> None:
     monkeypatch.setattr("custom_components.bticino_c100x.sip.secrets.randbelow", lambda _: 12345)
-    account = SipAccount("1", "user@gateway.bs.iotleg.com", "secret", "oid")
+    account = SipAccount("1", "user@registration.bs.iotleg.com", "secret", "oid")
     client = SipClient(account, "certificate", "key", AsyncMock())
     client._authenticated_request = AsyncMock(return_value=SipMessage("SIP/2.0 200 OK", {}))
 
-    await client.release_door("lock-module-id")
+    await client.release_door("lock-module-id", "gateway-module-id")
 
     client._authenticated_request.assert_awaited_once()
     method, uri, body = client._authenticated_request.await_args.args
     assert method == "MESSAGE"
-    assert uri == "sip:c100x@gateway.bs.iotleg.com"
+    assert uri == "sip:c100x@gateway-module-id.bs.iotleg.com"
     assert json.loads(body) == {
         "jsonrpc": "2.0",
         "id": "12345",
