@@ -42,3 +42,7 @@ Related community work includes the MIT-licensed
 which implements an alternative Legrand cloud REST approach for Classe 100X
 firmware v1. Its implementation was consulted for protocol comparison; no code
 was copied into this integration.
+
+The independently derived [Classe 100X protocol reference](docs/classe-100x-protocol.md)
+documents the app and cloud behavior used by this integration, including
+evidence levels and remaining unknowns.
