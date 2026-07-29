@@ -36,3 +36,9 @@ whether the physical door is open.
 
 Protocol behavior was independently implemented from the Classe 100X API and
 the vendor-signed Door Entry CLASSE100X Android application.
+
+Related community work includes the MIT-licensed
+[`adaofeliz/bticino-door-entry-v1`](https://github.com/adaofeliz/bticino-door-entry-v1),
+which implements an alternative Legrand cloud REST approach for Classe 100X
+firmware v1. Its implementation was consulted for protocol comparison; no code
+was copied into this integration.
