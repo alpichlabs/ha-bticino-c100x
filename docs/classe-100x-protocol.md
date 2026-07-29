@@ -179,7 +179,7 @@ Certificate creation in the official app is **Confirmed** as follows:
 7. Submit it with template `sipuser` and sender `{system: "information", addressType: "addressLocation", plant: <Plant>}`.
 8. Store the returned client certificate and CA chain with the private key for SIP TLS.
 
-The certificate calls first obtain a separate application token through the app's embedded client-credentials flow. The official request then uses the user access token in `Authorization` and the application token in `UserToken`. This ordering is confirmed at the call site; treating both headers as the same token is not an exact reproduction of the official app.
+The certificate calls first obtain a separate application token through the app's embedded client-credentials flow. The official request helper `u(userToken, bearerToken, key)` places the **application token** in `Authorization: Bearer ...` and the **user access token** in `UserToken`. This ordering is confirmed by both `U2.h1` call sites and `R2.a.u`; treating both headers as the same token, or reversing them, is not an exact reproduction of the official app.
 
 The official app checks certificate validity 30 days into the future (`now + 2,592,000,000 ms`). If that check fails, it deletes the stored key/certificate material so the alignment/provisioning flow can create a new set. Consequently, a long-running integration must renew before this 30-day window, not merely on the `notAfter` date.
 
@@ -368,14 +368,26 @@ The minimum remote flow inferred from the app is:
 - Do not infer Classe 100X behavior from Classe 300X/300EOS or Home + Security integrations.
 - The protocol is private and may change server-side without notice. HTTP/SIP error handling and reauthentication must be conservative.
 
+## Live read-only verification (2026-07-29)
+
+A direct test against a real Classe 100X account was performed outside Home Assistant. No `lock.setStatus` message was sent, no strike was actuated, and the media offer was receive-only. Identifiers and credentials are intentionally omitted.
+
+- The gateway reported model `bs-classe100x`, firmware `1.5.8`, hardware `02.07.0`, `CONNECTED`, and `on`.
+- The global and plant-scoped module endpoints both returned the same eight records: one gateway, three locks, one light, and three audio/video terminals. The three terminal roles were one `IU` and two `EU`. This confirms that multiple cloud lock records cannot be collapsed merely because the installation has one physical entrance; stale-record reconciliation needs stronger evidence.
+- The account already had three SIP clients. Attempting to create a fourth returned HTTP 400, so the test reused the existing dedicated integration client without involving the Home Assistant runtime.
+- Certificate provisioning with the recovered official-app headers, `sipuser` template, and `OU=C100X` succeeded. The client certificate SAN matched the SIP URI, its issuer was the Legrand production non-public CA, and its lifetime was approximately one year. The returned CA chain expires in 2036.
+- The repository SIP client completed authenticated TLS/Digest registration successfully with the newly provisioned certificate.
+- A receive-only monitoring `INVITE` targeting an `EU` terminal received the expected proxy `407`, followed by authenticated `200 OK`. The answer disabled audio (`m=audio 0`) and offered H.264 video over SRTP as `sendonly`. This proves direct camera-session signaling without a ring or strike command. The verifier failed before counting encrypted UDP packets, so end-to-end media reception and decoding remain unverified. An immediate retry received `486 Busy Here`, consistent with the first dialog still awaiting timeout.
+
+The test also confirms the corrected certificate-header split documented above: `Authorization` carries the application token and `UserToken` carries the user access token.
+
 ## What remains unverified
 
 Static analysis gives high confidence in endpoint construction and control flow, but it is not a substitute for a protocol capture. The following still require a user-authorized, redacted test session:
 
 - full request/response schemas and optional fields returned by every cloud endpoint;
-- exact SIP digest challenge parameters used in production;
 - packet-level confirmation of the inferred `text/plain` SIP `MESSAGE` content type and the final response sequence across every proxy node;
-- SDP offers/answers, codecs, SRTP mode, NAT traversal, and camera-switch responses;
+- encrypted RTP reception/decoding, NAT behavior across networks, and camera-switch responses;
 - whether the gateway returns an application-level JSON-RPC result after strike execution;
 - certificate lifetime and renewal behavior for every certificate template/account age.
 
@@ -408,7 +420,7 @@ The following app-owned symbols were independently cross-checked. Names are thos
 These are audit findings, not claims about the official app:
 
 1. The prototype provisions template `sipuser-DIY` with `OU=DIY`; app 1.8.4 provisions `sipuser` with `OU=C100X`.
-2. The prototype sends the user access token in both certificate headers; the app obtains an application token and uses it as `UserToken` while keeping the user token in `Authorization`.
+2. The prototype sends the user access token in both certificate headers; the app obtains an application token for `Authorization` and sends the user access token separately as `UserToken`.
 3. The prototype does not fetch/install `CACerts` and disables SIP TLS server verification; the app installs that CA chain and verifies the server against an explicit subject allow-list.
 4. The prototype hand-builds SIP requests. Header generation, routing, dialog/chat-room behavior, and content framing must be compared with Linphone behavior before considering it equivalent.
 5. The prototype reports success on a final SIP 200 response. The app waits for Linphone's message delivery state with a 15-second timeout; neither mechanism proves physical actuation.
