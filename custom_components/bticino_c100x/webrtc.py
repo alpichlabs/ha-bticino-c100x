@@ -134,8 +134,12 @@ class WebRTCBridge:
                 self._player = await asyncio.to_thread(
                     MediaPlayer,
                     str(self.media_path),
-                    format="h264",
-                    options={"analyzeduration": "0", "probesize": "32"},
+                    format="sdp",
+                    options={
+                        "protocol_whitelist": "file,udp,rtp",
+                        "analyzeduration": "0",
+                        "probesize": "32",
+                    },
                 )
                 self._video_source = self._player.video
                 if self._video_source and self.snapshot_path:

@@ -140,28 +140,32 @@ def test_ffmpeg_decrypts_h264_srtp_from_generated_sdp(tmp_path, socket_enabled) 
     shutil.which("ffmpeg") is None or os.environ.get("RUN_FFMPEG_SRTP_SMOKE") != "1",
     reason="credential-free UDP smoke test is run explicitly in CI",
 )
-def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
-    """Prove the exact FFmpeg-to-PyAV bounded local channel used by HA."""
+def test_ffmpeg_loopback_relay_allows_late_pyav_viewer(tmp_path, socket_enabled) -> None:
+    """Prove FFmpeg receives before a later Home Assistant viewer attaches."""
     ffmpeg = shutil.which("ffmpeg")
+    ports = []
     for port in range(52000, 62000, 2):
         first = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         second = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             first.bind(("127.0.0.1", port))
             second.bind(("127.0.0.1", port + 1))
-            break
+            ports.append(port)
+            first.close()
+            second.close()
+            if len(ports) == 2:
+                break
         except OSError:
             first.close()
             second.close()
     else:
-        raise AssertionError("No local RTP port pair is available")
-    first.close()
-    second.close()
+        if len(ports) < 2:
+            raise AssertionError("Two local RTP port pairs are required")
+    source_port, relay_port = ports
     key = base64.b64encode(bytes(range(30))).decode()
-    sdp = tmp_path / "receive.sdp"
-    fifo = tmp_path / "session.h264"
-    os.mkfifo(fifo, 0o600)
-    sdp.write_text(
+    receive_sdp = tmp_path / "receive.sdp"
+    playback_sdp = tmp_path / "playback.sdp"
+    receive_sdp.write_text(
         "\r\n".join(
             (
                 "v=0",
@@ -169,7 +173,7 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
                 "s=loopback",
                 "c=IN IP4 127.0.0.1",
                 "t=0 0",
-                f"m=video {port} RTP/SAVP 96",
+                f"m=video {source_port} RTP/SAVP 96",
                 "a=rtpmap:96 H264/90000",
                 "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
                 f"a=crypto:1 {SRTP_SUITE} inline:{key}",
@@ -177,7 +181,22 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
             )
         )
     )
-    receiver = subprocess.Popen(
+    playback_sdp.write_text(
+        "\r\n".join(
+            (
+                "v=0",
+                "o=- 0 0 IN IP4 127.0.0.1",
+                "s=loopback relay",
+                "c=IN IP4 127.0.0.1",
+                "t=0 0",
+                f"m=video {relay_port} RTP/AVP 96",
+                "a=rtpmap:96 H264/90000",
+                "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
+                "",
+            )
+        )
+    )
+    relay = subprocess.Popen(
         (
             ffmpeg,
             "-hide_banner",
@@ -193,15 +212,17 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
             "-f",
             "sdp",
             "-i",
-            str(sdp),
+            str(receive_sdp),
             "-map",
             "0:v:0",
             "-c:v",
             "copy",
+            "-payload_type",
+            "96",
             "-f",
-            "h264",
+            "rtp",
             "-y",
-            str(fifo),
+            f"rtp://127.0.0.1:{relay_port}?rtcpport={relay_port + 1}&pkt_size=1200",
         ),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -209,18 +230,27 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
 
     def read_frame() -> tuple[int, int]:
         with av.open(
-            str(fifo),
-            format="h264",
-            options={"analyzeduration": "0", "probesize": "32"},
+            str(playback_sdp),
+            format="sdp",
+            options={
+                "protocol_whitelist": "file,udp,rtp",
+                "analyzeduration": "0",
+                "probesize": "32",
+            },
         ) as container:
-            frame = next(container.decode(video=0))
-            return frame.width, frame.height
+            for packet in container.demux(video=0):
+                try:
+                    frames = packet.decode()
+                except av.InvalidDataError:
+                    continue
+                if frames:
+                    return frames[0].width, frames[0].height
+        raise AssertionError("No valid relayed video frame was decoded")
 
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
-            decoded = pool.submit(read_frame)
             time.sleep(1)
-            sender = subprocess.run(
+            sender = subprocess.Popen(
                 (
                     ffmpeg,
                     "-hide_banner",
@@ -232,11 +262,13 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
                     "-i",
                     "testsrc=size=160x120:rate=5",
                     "-frames:v",
-                    "10",
+                    "30",
                     "-c:v",
                     "libx264",
                     "-tune",
                     "zerolatency",
+                    "-g",
+                    "5",
                     "-pix_fmt",
                     "yuv420p",
                     "-payload_type",
@@ -247,24 +279,31 @@ def test_ffmpeg_h264_fifo_is_decoded_by_pyav(tmp_path, socket_enabled) -> None:
                     SRTP_SUITE,
                     "-srtp_out_params",
                     key,
-                    f"srtp://127.0.0.1:{port}",
+                    f"srtp://127.0.0.1:{source_port}",
                 ),
-                check=False,
-                capture_output=True,
-                timeout=10,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
-            assert sender.returncode == 0, sender.stderr.decode(errors="replace")
+            # The relay must keep receiving without a camera reader attached.
+            time.sleep(1.5)
+            assert relay.poll() is None
+            decoded = pool.submit(read_frame)
             try:
                 dimensions = decoded.result(timeout=5)
             except FutureTimeoutError:
-                receiver.kill()
-                receiver.wait(timeout=2)
-                assert receiver.stderr
+                relay.kill()
+                relay.wait(timeout=2)
+                assert relay.stderr
                 raise AssertionError(
-                    receiver.stderr.read().decode(errors="replace")
+                    relay.stderr.read().decode(errors="replace")
                 ) from None
             assert dimensions == (160, 120)
+            sender.wait(timeout=10)
+            assert sender.returncode == 0
     finally:
-        if receiver.poll() is None:
-            receiver.kill()
-            receiver.wait(timeout=2)
+        if "sender" in locals() and sender.poll() is None:
+            sender.kill()
+            sender.wait(timeout=2)
+        if relay.poll() is None:
+            relay.kill()
+            relay.wait(timeout=2)

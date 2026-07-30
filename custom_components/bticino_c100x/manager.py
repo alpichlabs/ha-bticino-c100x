@@ -231,7 +231,7 @@ class C100XManager:
             runtime,
             self._notify,
             domain,
-            self._material_dir / "session.h264",
+            self._material_dir / "playback.sdp",
             self._material_dir / "snapshot.jpg",
         )
         self.microphone_uplink = MicrophoneUplink(self.media_session)

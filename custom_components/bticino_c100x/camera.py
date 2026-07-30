@@ -32,7 +32,7 @@ class C100XCamera(C100XEntity, Camera):
         self._camera_id = camera_id
         self._attr_unique_id = f"{entry.entry_id}-{camera_id}-camera"
         self._bridge = WebRTCBridge(
-            Path(self.manager._material_dir, "session.h264"),
+            Path(self.manager._material_dir, "playback.sdp"),
             self._viewer_changed,
             lambda: self.manager.media_session.runtime.audio_track
             if self.manager.media_session

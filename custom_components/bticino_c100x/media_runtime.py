@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import secrets
 import socket
 import time
@@ -246,20 +245,25 @@ class MediaRuntime:
             video_port=video_port,
             device_address=device_address,
         )
+        relay_sockets: tuple[socket.socket, ...] = ()
         try:
             answer = await self.sip.start_monitoring(offer.sdp)
             session = parse_answer(answer, offer)
             self.negotiated = session
             self.audio.configure(session)
             receive_sdp = build_receive_sdp(session, include_audio=False)
-            sdp_path = media_path.with_suffix(".sdp")
+            sdp_path = media_path.with_name("receive-srtp.sdp")
             self._media_path = media_path
             self._sdp_path = sdp_path
             await asyncio.to_thread(_write_private, sdp_path, receive_sdp)
             for reserved in video_sockets:
                 reserved.close()
             video_sockets = ()
-            await asyncio.to_thread(_make_fifo, media_path)
+            relay_sockets, relay_port = await asyncio.to_thread(_reserve_loopback_pair)
+            await asyncio.to_thread(_write_private, media_path, _playback_sdp(relay_port))
+            for reserved in relay_sockets:
+                reserved.close()
+            relay_sockets = ()
             command = [
                 self.ffmpeg_binary,
                 "-hide_banner",
@@ -284,12 +288,14 @@ class MediaRuntime:
                 "0:v:0",
                 "-c:v",
                 "copy",
+                "-payload_type",
+                "96",
                 "-f",
-                "h264",
+                "rtp",
                 "-progress",
                 "pipe:2",
                 "-y",
-                str(media_path),
+                f"rtp://127.0.0.1:{relay_port}?rtcpport={relay_port + 1}&pkt_size=1200",
             ]
             self.process = await asyncio.create_subprocess_exec(
                 *command,
@@ -309,6 +315,8 @@ class MediaRuntime:
             )
         except Exception:
             for reserved in video_sockets:
+                reserved.close()
+            for reserved in relay_sockets:
                 reserved.close()
             await self._teardown(send_bye=True)
             raise
@@ -492,7 +500,33 @@ def _write_private(path: Path, value: str) -> None:
     path.chmod(0o600)
 
 
-def _make_fifo(path: Path) -> None:
-    with contextlib.suppress(FileNotFoundError):
-        path.unlink()
-    os.mkfifo(path, 0o600)
+def _reserve_loopback_pair() -> tuple[tuple[socket.socket, socket.socket], int]:
+    for _ in range(100):
+        port = secrets.randbelow(10000) * 2 + 40000
+        first = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        second = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            first.bind(("127.0.0.1", port))
+            second.bind(("127.0.0.1", port + 1))
+            return (first, second), port
+        except OSError:
+            first.close()
+            second.close()
+    raise MediaRuntimeError("No loopback RTP port pair is available")
+
+
+def _playback_sdp(port: int) -> str:
+    return "\r\n".join(
+        (
+            "v=0",
+            "o=- 0 0 IN IP4 127.0.0.1",
+            "s=BTicino Classe 100X local relay",
+            "c=IN IP4 127.0.0.1",
+            "t=0 0",
+            f"m=video {port} RTP/AVP 96",
+            "a=rtpmap:96 H264/90000",
+            "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
+            "a=recvonly",
+            "",
+        )
+    )
