@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import secrets
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .api import LegrandApi
@@ -26,12 +28,14 @@ from .const import (
     EVENT_RING,
     RING_ACTIVE_SECONDS,
     SIP_RECONNECT_SECONDS,
-    SIP_REREGISTER_SECONDS,
     STORAGE_VERSION,
 )
+from .linphone_runtime import LinphoneRuntime, LinphoneRuntimeError, download_runtime
+from .media_session import MediaSession
 from .models import SipAccount
-from .sip import SipClient, SipError
+from .sip import SipError
 from .topology import visible_external_units, visible_lock_modules
+from .uplink import MicrophoneUplink
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +66,10 @@ class C100XManager:
         self._seen_call_ids: set[str] = set()
         self._supervisor: asyncio.Task | None = None
         self._ring_reset: asyncio.TimerHandle | None = None
-        self._client: SipClient | None = None
+        self._runtime: LinphoneRuntime | None = None
+        self.media_session: MediaSession | None = None
+        self.microphone_uplink: MicrophoneUplink | None = None
+        self._delivery: asyncio.Future[None] | None = None
         self._store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self._material_dir = Path(hass.config.path(".storage", DOMAIN, entry.entry_id))
         self._certificate_path = self._material_dir / "client.crt"
@@ -87,18 +94,56 @@ class C100XManager:
             self._supervisor.cancel()
             await asyncio.gather(self._supervisor, return_exceptions=True)
             self._supervisor = None
-        if self._client:
-            await self._client.close()
-            self._client = None
+        if self.media_session:
+            if self.microphone_uplink:
+                with contextlib.suppress(Exception):
+                    await self.microphone_uplink.close()
+                self.microphone_uplink = None
+            with contextlib.suppress(Exception):
+                await self.media_session.end()
+            self.media_session = None
+        if self._runtime:
+            await self._runtime.close()
+            self._runtime = None
         self.registered = False
 
     async def async_release(self, lock_id: str) -> None:
-        if not self._client or not self._client.registered:
+        if not self._runtime or not self.registered:
             raise SipError("Door release is unavailable while SIP is disconnected")
-        await self._client.release_door(
-            lock_id,
-            self.entry.data[CONF_GATEWAY_ID],
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": str(secrets.randbelow(2**31)),
+                "method": "lock.setStatus",
+                "params": [{"status": "open", "receiver": {"plant": {"coal": {"id": lock_id}}}}],
+            },
+            separators=(",", ":"),
         )
+        gateway = self.entry.data[CONF_GATEWAY_ID]
+        domain = gateway if gateway.endswith(".bs.iotleg.com") else f"{gateway}.bs.iotleg.com"
+        if self._delivery and not self._delivery.done():
+            raise SipError("Another SIP message is awaiting delivery")
+        self._delivery = asyncio.get_running_loop().create_future()
+        await self._runtime.send_strike(f"sip:c100x@{domain}", body)
+        try:
+            await asyncio.wait_for(self._delivery, timeout=10)
+        except TimeoutError as err:
+            raise SipError("Door release delivery timed out") from err
+        finally:
+            self._delivery = None
+
+    async def async_start_monitoring(self, camera_id: str) -> None:
+        if not self.media_session:
+            raise SipError("Media runtime is unavailable")
+        if camera_id not in self.camera_ids:
+            raise SipError("External unit is not visible in the official topology")
+        await self.media_session.start(camera_id)
+
+    async def async_end_monitoring(self) -> None:
+        if self.microphone_uplink:
+            await self.microphone_uplink.close()
+        if self.media_session:
+            await self.media_session.end()
 
     @callback
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
@@ -172,41 +217,56 @@ class C100XManager:
         self._ca_path.chmod(0o600)
 
     async def _connect(self, account: SipAccount) -> None:
-        client = SipClient(
-            account,
-            str(self._certificate_path),
-            str(self._private_key_path),
-            str(self._ca_path),
-            self._async_ring,
+        runtime_dir = self._material_dir / "runtime"
+        executable = runtime_dir / "bin" / "bticino-c100x-linphone"
+        if not executable.is_file():
+            executable = await download_runtime(async_get_clientsession(self.hass), runtime_dir)
+        runtime = LinphoneRuntime(executable, self._material_dir / "linphone.sock", self._runtime_event)
+        await runtime.start()
+        gateway = self.entry.data[CONF_GATEWAY_ID]
+        domain = gateway if gateway.endswith(".bs.iotleg.com") else f"{gateway}.bs.iotleg.com"
+        await runtime.register(
+            sip_uri=account.sip_uri,
+            username=account.username,
+            password=account.sip_password,
+            domain=domain,
+            proxy="sip:vdesip.bs.iotleg.com;transport=tls",
+            certificate_path=self._certificate_path,
+            private_key_path=self._private_key_path,
+            ca_path=self._ca_path,
+            microphone_path=self._material_dir / "microphone.pcm.wav",
         )
-        await client.connect()
-        self._client = client
-        self.registered = True
+        self._runtime = runtime
+        self.media_session = MediaSession(
+            runtime,
+            self._notify,
+            domain,
+            self._material_dir / "session.mkv",
+            self._material_dir / "snapshot.jpg",
+        )
+        self.microphone_uplink = MicrophoneUplink(self.media_session)
+        self.registered = False
         self.last_error = None
         self._notify()
 
     async def _supervise(self, account: SipAccount) -> None:
         while True:
             try:
-                assert self._client is not None
-                await asyncio.wait_for(self._client.wait_closed(), timeout=SIP_REREGISTER_SECONDS)
-                raise SipError("SIP connection ended")
-            except TimeoutError:
-                try:
-                    await self._client.register()
-                    continue
-                except Exception as err:
-                    self.last_error = type(err).__name__
+                assert self._runtime is not None and self._runtime.process is not None
+                await self._runtime.process.wait()
+                raise LinphoneRuntimeError("Linphone runtime exited")
             except asyncio.CancelledError:
                 raise
             except Exception as err:
                 self.last_error = type(err).__name__
             self.registered = False
             self._notify()
-            if self._client:
+            if self._runtime:
                 with contextlib.suppress(Exception):
-                    await self._client.close()
-                self._client = None
+                    await self._runtime.close()
+                self._runtime = None
+                self.media_session = None
+                self.microphone_uplink = None
             await asyncio.sleep(SIP_RECONNECT_SECONDS)
             try:
                 await self._connect(account)
@@ -215,6 +275,26 @@ class C100XManager:
             except Exception as err:
                 self.last_error = type(err).__name__
                 _LOGGER.warning("BTicino SIP reconnect failed: %s", type(err).__name__)
+
+    async def _runtime_event(self, event: dict[str, Any]) -> None:
+        event_type = event.get("event")
+        if event_type == "registration":
+            self.registered = event.get("state") == "ok"
+            if event.get("state") == "failed":
+                self.last_error = "registration_failed"
+        elif event_type == "ring":
+            await self._async_ring(event)
+        elif event_type == "message_delivery" and self._delivery and not self._delivery.done():
+            state = event.get("state")
+            if state == "delivered":
+                self._delivery.set_result(None)
+            elif state in {"not_delivered", "error"}:
+                self._delivery.set_exception(SipError("Door release message was not delivered"))
+        elif event_type == "error":
+            self.last_error = str(event.get("code") or "runtime_error")
+        if self.media_session:
+            self.media_session.handle_event(event)
+        self._notify()
 
     async def _async_ring(self, event: dict[str, Any]) -> None:
         call_id = str(event.get("call_id", ""))

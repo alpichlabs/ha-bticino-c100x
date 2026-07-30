@@ -1,6 +1,6 @@
 [project]
 name = "ha-bticino-c100x"
-version = "0.1.0b1"
+version = "0.2.0b1"
 requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
@@ -16,4 +16,3 @@ select = ["B", "E", "F", "I", "LOG", "RUF", "SIM", "UP", "W"]
 
 [tool.coverage.run]
 source = ["custom_components/bticino_c100x"]
-

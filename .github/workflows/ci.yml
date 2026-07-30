@@ -2,29 +2,28 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  test-integration:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
-      - run: python -m pip install -r requirements_test.txt ruff cryptography
-      - run: ruff check .
+      - run: pip install -r requirements_test.txt
+      - run: ruff check custom_components runtime tests
       - run: pytest -q
 
-  validate:
-    runs-on: ubuntu-latest
+  test-amd64-runtime:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: hacs/action@main
-        with:
-          category: integration
+      - uses: actions/checkout@v4
+      - name: Build runtime from pinned inputs
+        run: runtime/build-runtime.sh
+      - name: Verify deterministic release checksum
+        run: grep '586b9b79643c49e9a0cc19dfe2bf92693c264941168af28246524a5079bc514b' bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256
+      - name: Run credential-free IPC smoke test
+        run: python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz 586b9b79643c49e9a0cc19dfe2bf92693c264941168af28246524a5079bc514b

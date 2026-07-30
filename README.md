@@ -5,15 +5,21 @@ running firmware 1.x. It uses Legrand's Door Entry cloud topology and the
 Classe 100X SIP channel for momentary electric-strike releases and real-time
 ringing, without modifying the intercom firmware.
 
-## Beta scope
+## Features
 
-- Pulse the door release at any time from Home Assistant
+- Start an on-demand Classe 100X monitoring session without changing firmware
+- Receive live video and intercom audio through a standard Home Assistant camera
+- Use the bundled `bticino-c100x-card` in browsers and Companion App WebViews
+- Keep the microphone disabled until the card's explicit microphone action
+- Share one Linphone call between multiple viewers and clean it up automatically
+- Pulse any vendor-visible door release at any time from Home Assistant
 - Receive real-time doorbell events
 - Use doorbell events in automations and Companion App notifications
 - Keep the official Door Entry app operational through a separate SIP account
 - Expose SIP registration and certificate-expiry diagnostics
 
-Video, two-way audio, HomeKit and staircase lighting are not included.
+Staircase lighting is intentionally not included. The first runtime release is
+Linux amd64 only; unsupported architectures fail with a clear diagnostic.
 
 ## Installation
 
@@ -22,8 +28,21 @@ Video, two-way audio, HomeKit and staircase lighting are not included.
 3. Install **BTicino C100X** and restart Home Assistant.
 4. Add the integration from **Settings → Devices & services**.
 
+The integration downloads its checksum-pinned Linphone runtime from the matching
+GitHub release into Home Assistant protected storage. No SIP, RTP, control or
+media port is exposed. In Lovelace storage mode the bundled card resource is
+registered automatically; add a **BTicino C100X Intercom** card and select the
+camera, Start, End and Release entities. The regular camera entity is also usable
+with Home Assistant's native WebRTC player.
+
 Credentials are entered only in Home Assistant. They must never be included in
 issues or diagnostic logs.
+
+Opening the live camera or pressing **Start monitoring** is an explicit user
+action and places one monitoring call to the external unit. Dashboard snapshot
+refreshes only read the last cached JPEG and never place a call. **End session**
+hangs up immediately; otherwise the call ends ten seconds after the final viewer
+disconnects.
 
 ## Safety
 
@@ -36,6 +55,12 @@ whether the physical door is open.
 
 Protocol behavior was independently implemented from the Classe 100X API and
 the vendor-signed Door Entry CLASSE100X Android application.
+
+The separately packaged runtime embeds [Linphone 5.4](https://www.linphone.org/)
+and Mediastreamer2 from Belledonne Communications. It is distributed under
+GPLv3 with corresponding source and build instructions attached to its GitHub
+release. The Home Assistant integration remains under this repository's MIT
+license.
 
 Related community work includes the MIT-licensed
 [`adaofeliz/bticino-door-entry-v1`](https://github.com/adaofeliz/bticino-door-entry-v1),

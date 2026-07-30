@@ -3,7 +3,13 @@
 from homeassistant.const import Platform
 
 DOMAIN = "bticino_c100x"
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.EVENT, Platform.SENSOR]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.CAMERA,
+    Platform.EVENT,
+    Platform.SENSOR,
+]
 
 CONF_HOME_ID = "home_id"
 CONF_GATEWAY_ID = "gateway_id"

@@ -4,11 +4,11 @@
   "codeowners": ["@alpichlabs"],
   "config_flow": true,
   "documentation": "https://github.com/alpichlabs/ha-bticino-c100x",
+  "dependencies": ["http", "lovelace"],
   "integration_type": "device",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/alpichlabs/ha-bticino-c100x/issues",
   "loggers": ["custom_components.bticino_c100x"],
-  "requirements": [],
-  "version": "0.1.0-beta.1"
+  "requirements": ["aiortc==1.15.0"],
+  "version": "0.2.0-beta.1"
 }
-

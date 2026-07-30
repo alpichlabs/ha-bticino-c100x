@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiohttp
+from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -17,6 +20,20 @@ from .auth import AuthenticationError, C100XAuth
 from .const import DOMAIN, PLATFORMS, STORAGE_VERSION
 from .manager import C100XManager
 from .sip import SipError
+from .websocket import async_register as async_register_websocket
+
+CARD_URL = "/bticino_c100x/bticino-c100x-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register private APIs and the card asset once."""
+    async_register_websocket(hass)
+    card_path = Path(__file__).parent / "frontend" / "bticino-c100x-card.js"
+    if hass.http:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, str(card_path), cache_headers=False)]
+        )
+    return True
 
 
 @dataclass(slots=True)
@@ -52,8 +69,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: C100XConfigEntry) -> boo
         raise ConfigEntryNotReady(str(err)) from err
 
     entry.runtime_data = RuntimeData(manager)
+    await _async_register_card_resource(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_register_card_resource(hass: HomeAssistant) -> None:
+    """Register the bundled card when Lovelace uses storage resources."""
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if not lovelace or lovelace.resource_mode != MODE_STORAGE:
+        return
+    resources = lovelace.resources
+    await resources.async_get_info()
+    if any(item.get("url") == CARD_URL for item in resources.async_items()):
+        return
+    await resources.async_create_item({"res_type": "module", "url": CARD_URL})
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: C100XConfigEntry) -> None:
