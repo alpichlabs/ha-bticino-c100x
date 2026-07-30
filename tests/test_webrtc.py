@@ -5,6 +5,14 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.bticino_c100x.webrtc import WebRTCBridge
+from custom_components.bticino_c100x.webrtc_config import STUN_URLS
+
+
+def test_stun_has_independent_fallback() -> None:
+    assert STUN_URLS == (
+        "stun:stun.cloudflare.com:3478",
+        "stun:stun.linphone.org:3478",
+    )
 
 
 @pytest.mark.asyncio

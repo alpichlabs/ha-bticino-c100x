@@ -15,6 +15,7 @@ from webrtc_models import RTCConfiguration, RTCIceCandidateInit, RTCIceServer
 from . import C100XConfigEntry
 from .entity import C100XEntity
 from .webrtc import WebRTCBridge
+from .webrtc_config import STUN_URLS
 
 
 async def async_setup_entry(
@@ -59,7 +60,7 @@ class C100XCamera(C100XEntity, Camera):
         """Give remote browsers a server-reflexive ICE candidate."""
         return WebRTCClientConfiguration(
             configuration=RTCConfiguration(
-                ice_servers=[RTCIceServer(urls="stun:stun.linphone.org:3478")]
+                ice_servers=[RTCIceServer(urls=list(STUN_URLS))]
             )
         )
 

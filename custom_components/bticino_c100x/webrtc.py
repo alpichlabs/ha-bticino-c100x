@@ -19,6 +19,8 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
+from .webrtc_config import STUN_URLS
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -80,7 +82,7 @@ class WebRTCBridge:
             await self._ensure_player()
             peer = RTCPeerConnection(
                 RTCConfiguration(
-                    iceServers=[RTCIceServer(urls="stun:stun.linphone.org:3478")]
+                    iceServers=[RTCIceServer(urls=list(STUN_URLS))]
                 )
             )
             self._peers[session_id] = peer
