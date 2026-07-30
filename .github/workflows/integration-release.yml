@@ -14,7 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify release version
-        run: grep "\"version\": \"${GITHUB_REF_NAME#v}\"" custom_components/bticino_c100x/manifest.json
+        run: |
+          grep "\"version\": \"${GITHUB_REF_NAME#v}\"" custom_components/bticino_c100x/manifest.json
       - name: Publish HACS release
         env:
           GH_TOKEN: ${{ github.token }}
