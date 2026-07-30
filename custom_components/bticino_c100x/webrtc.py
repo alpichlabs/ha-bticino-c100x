@@ -126,11 +126,18 @@ class WebRTCBridge:
     async def add_candidate(self, session_id: str, value: Any) -> None:
         peer = self._peers.get(session_id)
         if peer is None:
+            _LOGGER.warning("BTicino WebRTC candidate ignored: unknown session")
             return
         raw = getattr(value, "candidate", None)
         if not raw:
+            _LOGGER.warning("BTicino WebRTC browser candidates complete")
             await peer.addIceCandidate(None)
             return
+        match = re.search(r"\styp\s+(\w+)", raw)
+        _LOGGER.warning(
+            "BTicino WebRTC browser candidate: %s",
+            match.group(1) if match else "unknown",
+        )
         candidate = candidate_from_sdp(raw.removeprefix("candidate:"))
         candidate.sdpMid = getattr(value, "sdp_mid", None)
         candidate.sdpMLineIndex = getattr(value, "sdp_m_line_index", None)
