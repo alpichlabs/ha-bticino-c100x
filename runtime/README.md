@@ -8,6 +8,9 @@ The helper and the combined runtime archive are licensed under GPLv3. The
 corresponding helper source is `runtime/helper.py`; Linphone source for the exact
 5.4 build is available from Belledonne Communications and is linked from the
 release notes. Build inputs are checksum-pinned by `runtime/build-runtime.sh`.
+The SHA-256 embedded in the integration is copied from the Ubuntu-built release
+asset digest after publication; compressed bytes are not assumed reproducible
+between different zlib implementations.
 
 The archive is Linux amd64 only. Never start the helper manually with production
 credentials; Home Assistant supervises its lifecycle and sanitizes diagnostics.

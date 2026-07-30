@@ -23,7 +23,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build runtime from pinned inputs
         run: runtime/build-runtime.sh
-      - name: Verify deterministic release checksum
-        run: grep '586b9b79643c49e9a0cc19dfe2bf92693c264941168af28246524a5079bc514b' bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256
       - name: Run credential-free IPC smoke test
-        run: python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz 586b9b79643c49e9a0cc19dfe2bf92693c264941168af28246524a5079bc514b
+        run: python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz "$(cut -d ' ' -f 1 bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256)"
