@@ -24,6 +24,7 @@ from aiortc.sdp import candidate_from_sdp
 from .webrtc_config import STUN_URLS
 
 _LOGGER = logging.getLogger(__name__)
+PLAYER_GRACE_SECONDS = 10
 
 
 class _SnapshotTrack(MediaStreamTrack):
@@ -73,6 +74,8 @@ class WebRTCBridge:
         self._relay = MediaRelay()
         self._peers: dict[str, RTCPeerConnection] = {}
         self._pending_candidates: dict[str, list[Any]] = {}
+        self._keepalive_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
     def prepare(self, session_id: str) -> None:
@@ -81,6 +84,9 @@ class WebRTCBridge:
 
     async def answer(self, session_id: str, offer_sdp: str) -> str:
         async with self._lock:
+            if self._cleanup_task:
+                self._cleanup_task.cancel()
+                self._cleanup_task = None
             await self._ensure_player()
             peer = RTCPeerConnection(_rtc_configuration())
             self._peers[session_id] = peer
@@ -130,6 +136,8 @@ class WebRTCBridge:
                 self._pending_candidates.pop(session_id, None)
                 self.viewer_changed(-1)
                 await peer.close()
+                if not self._peers:
+                    self._schedule_player_cleanup()
                 raise
 
     async def add_candidate(self, session_id: str, value: Any) -> None:
@@ -176,17 +184,16 @@ class WebRTCBridge:
             await peer.close()
             self.viewer_changed(-1)
             if not self._peers:
-                if self._player:
-                    if self._player.video:
-                        self._player.video.stop()
-                    if self._player.audio:
-                        self._player.audio.stop()
-                self._player = None
-                self._video_source = None
+                self._schedule_player_cleanup()
 
     async def close_all(self) -> None:
         for session_id in tuple(self._peers):
             await self.close(session_id)
+        async with self._lock:
+            if self._cleanup_task:
+                self._cleanup_task.cancel()
+                self._cleanup_task = None
+            await self._cleanup_player_locked()
 
     async def _ensure_player(self) -> None:
         if self._player is not None:
@@ -208,9 +215,49 @@ class WebRTCBridge:
                     self._video_source = _SnapshotTrack(
                         self._video_source, self.snapshot_path
                     )
+                if self._video_source:
+                    self._keepalive_task = asyncio.create_task(
+                        self._keepalive_video(self._video_source)
+                    )
                 return
             await asyncio.sleep(0.1)
         raise RuntimeError("Media channel did not become ready")
+
+    async def _keepalive_video(self, source: MediaStreamTrack) -> None:
+        """Drain decoded frames so rapid viewers retain H.264 decoder context."""
+        track = self._relay.subscribe(source, buffered=False)
+        try:
+            while True:
+                await track.recv()
+        finally:
+            track.stop()
+
+    def _schedule_player_cleanup(self) -> None:
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._cleanup_player_after_grace())
+
+    async def _cleanup_player_after_grace(self) -> None:
+        try:
+            await asyncio.sleep(PLAYER_GRACE_SECONDS)
+            async with self._lock:
+                self._cleanup_task = None
+                if not self._peers:
+                    await self._cleanup_player_locked()
+        except asyncio.CancelledError:
+            raise
+
+    async def _cleanup_player_locked(self) -> None:
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            await asyncio.gather(self._keepalive_task, return_exceptions=True)
+            self._keepalive_task = None
+        if self._player:
+            if self._player.video:
+                self._player.video.stop()
+            if self._player.audio:
+                self._player.audio.stop()
+        self._player = None
+        self._video_source = None
 
 
 def _candidate_summary(sdp: str) -> str:

@@ -1,5 +1,6 @@
 """Tests for WebRTC candidate lifecycle."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -38,6 +39,28 @@ def test_audio_and_video_share_one_ice_transport() -> None:
 
     assert configuration.bundlePolicy is RTCBundlePolicy.MAX_BUNDLE
     assert configuration.iceServers[0].urls == list(STUN_URLS)
+
+
+@pytest.mark.asyncio
+async def test_player_cleanup_waits_for_reuse_grace(monkeypatch) -> None:
+    bridge = WebRTCBridge.__new__(WebRTCBridge)
+    bridge._cleanup_task = None
+    bridge._lock = asyncio.Lock()
+    bridge._peers = {}
+    bridge.cleaned = False
+
+    async def cleanup() -> None:
+        bridge.cleaned = True
+
+    bridge._cleanup_player_locked = cleanup
+    monkeypatch.setattr("custom_components.bticino_c100x.webrtc.PLAYER_GRACE_SECONDS", 0)
+
+    bridge._schedule_player_cleanup()
+    task = bridge._cleanup_task
+    assert task is not None
+    await task
+
+    assert bridge.cleaned is True
 
 
 @pytest.mark.asyncio
