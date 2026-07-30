@@ -18,6 +18,7 @@ from homeassistant.helpers.storage import Store
 from .api import ApiError, LegrandApi
 from .auth import AuthenticationError, C100XAuth
 from .const import DOMAIN, PLATFORMS, STORAGE_VERSION
+from .linphone_runtime import LinphoneRuntimeError
 from .manager import C100XManager
 from .sip import SipError
 from .websocket import async_register as async_register_websocket
@@ -65,7 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: C100XConfigEntry) -> boo
         if err.status in (401, 403):
             raise ConfigEntryAuthFailed(str(err)) from err
         raise ConfigEntryNotReady(str(err)) from err
-    except (OSError, SipError) as err:
+    except (OSError, SipError, LinphoneRuntimeError) as err:
         raise ConfigEntryNotReady(str(err)) from err
 
     entry.runtime_data = RuntimeData(manager)

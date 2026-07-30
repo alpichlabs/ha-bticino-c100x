@@ -222,20 +222,24 @@ class C100XManager:
         if not executable.is_file():
             executable = await download_runtime(async_get_clientsession(self.hass), runtime_dir)
         runtime = LinphoneRuntime(executable, self._material_dir / "linphone.sock", self._runtime_event)
-        await runtime.start()
-        gateway = self.entry.data[CONF_GATEWAY_ID]
-        domain = gateway if gateway.endswith(".bs.iotleg.com") else f"{gateway}.bs.iotleg.com"
-        await runtime.register(
-            sip_uri=account.sip_uri,
-            username=account.username,
-            password=account.sip_password,
-            domain=domain,
-            proxy="sip:vdesip.bs.iotleg.com;transport=tls",
-            certificate_path=self._certificate_path,
-            private_key_path=self._private_key_path,
-            ca_path=self._ca_path,
-            microphone_path=self._material_dir / "microphone.pcm.wav",
-        )
+        try:
+            await runtime.start()
+            gateway = self.entry.data[CONF_GATEWAY_ID]
+            domain = gateway if gateway.endswith(".bs.iotleg.com") else f"{gateway}.bs.iotleg.com"
+            await runtime.register(
+                sip_uri=account.sip_uri,
+                username=account.username,
+                password=account.sip_password,
+                domain=domain,
+                proxy="sip:vdesip.bs.iotleg.com;transport=tls",
+                certificate_path=self._certificate_path,
+                private_key_path=self._private_key_path,
+                ca_path=self._ca_path,
+                microphone_path=self._material_dir / "microphone.pcm.wav",
+            )
+        except Exception:
+            await runtime.close()
+            raise
         self._runtime = runtime
         self.media_session = MediaSession(
             runtime,

@@ -52,7 +52,8 @@ def main() -> None:
                 }
                 client.sendall(b'{"id":2,"command":"self_test"}\n')
                 self_test = json.loads(reader.readline())
-                assert self_test == {"id": 2, "binding": "ok"}
+                if self_test != {"id": 2, "binding": "ok", "missing": []}:
+                    raise AssertionError(f"unexpected self-test response: {self_test!r}")
                 client.sendall(b'{"id":3,"command":"shutdown"}\n')
                 shutdown = json.loads(reader.readline())
                 assert shutdown == {"id": 3}

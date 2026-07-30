@@ -144,8 +144,7 @@ class Runtime:
             "set_media_encryption_mandatory",
             "set_user_agent",
         )
-        if not all(hasattr(core, name) for name in required_core):
-            raise RuntimeError("Linphone Core API mismatch")
+        missing = [f"Core.{name}" for name in required_core if not hasattr(type(core), name)]
         params = core.create_call_params(None)
         required_params = (
             "add_custom_sdp_attribute",
@@ -155,11 +154,13 @@ class Runtime:
             "record_file",
             "video_direction",
         )
-        if not all(hasattr(params, name) for name in required_params):
-            raise RuntimeError("Linphone CallParams API mismatch")
-        if not hasattr(factory, "create_call_cbs") or not hasattr(factory, "create_chat_message_cbs"):
-            raise RuntimeError("Linphone callback API mismatch")
-        return {"binding": "ok"}
+        missing.extend(
+            f"CallParams.{name}" for name in required_params if not hasattr(type(params), name)
+        )
+        for name in ("create_call_cbs", "create_chat_message_cbs"):
+            if not hasattr(type(factory), name):
+                missing.append(f"Factory.{name}")
+        return {"binding": "ok" if not missing else "mismatch", "missing": missing}
 
     def command_register(self, request: dict[str, Any]) -> None:
         if self.core is not None:
