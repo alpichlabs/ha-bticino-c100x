@@ -49,6 +49,7 @@ class Runtime:
         self.media_started = False
         self.last_bandwidth_emit = 0.0
         self.media_path: str | None = None
+        self.media_guard_fd: int | None = None
         self.snapshot_path: str | None = None
         self.microphone_enabled = False
         self.microphone_fd: int | None = None
@@ -136,8 +137,8 @@ class Runtime:
         required_core = (
             "add_auth_info",
             "add_proxy_config",
+            "add_listener",
             "create_address",
-            "create_auth_info",
             "create_call_params",
             "create_proxy_config",
             "invite_address_with_params",
@@ -157,21 +158,41 @@ class Runtime:
         missing.extend(
             f"CallParams.{name}" for name in required_params if not hasattr(type(params), name)
         )
-        for name in ("create_call_cbs", "create_chat_message_cbs"):
+        for name in (
+            "create_auth_info",
+            "create_call_listener",
+            "create_chat_message_listener",
+            "create_core_listener",
+        ):
             if not hasattr(type(factory), name):
                 missing.append(f"Factory.{name}")
+        auth = factory.create_auth_info("self-test", None, "example.invalid")
+        for name in ("domain", "password", "tls_cert_path", "tls_key_path"):
+            if not hasattr(type(auth), name):
+                missing.append(f"AuthInfo.{name}")
+        listeners = (
+            (factory.create_core_listener(), ("on_call_state_changed", "on_registration_state_changed")),
+            (factory.create_call_listener(), ("on_next_video_frame_decoded",)),
+            (factory.create_chat_message_listener(), ("on_msg_state_changed",)),
+        )
+        for listener, names in listeners:
+            missing.extend(
+                f"{type(listener).__name__}.{name}"
+                for name in names
+                if not hasattr(type(listener), name)
+            )
         return {"binding": "ok" if not missing else "mismatch", "missing": missing}
 
     def command_register(self, request: dict[str, Any]) -> None:
         if self.core is not None:
             raise RuntimeError("already configured")
         factory = linphone.Factory.get()
-        callbacks = factory.create_core_cbs()
-        callbacks.registration_state_changed = self._registration_changed
-        callbacks.call_state_changed = self._call_state_changed
-        callbacks.message_received = self._message_received
+        callbacks = factory.create_core_listener()
+        callbacks.on_registration_state_changed = self._registration_changed
+        callbacks.on_call_state_changed = self._call_state_changed
+        callbacks.on_message_received = self._message_received
         core = factory.create_core(None, None, None)
-        core.add_callbacks(callbacks)
+        core.add_listener(callbacks)
         core.max_calls = 1
         core.set_user_agent("VctLinphoneService", "1.8.4")
         core.root_ca = request["ca_path"]
@@ -200,9 +221,9 @@ class Runtime:
         proxy.expires = int(request.get("expires", 5184000))
         proxy.register_enabled = True
         core.add_proxy_config(proxy)
-        auth = core.create_auth_info(
-            request["username"], None, request["password"], None, None, request["domain"]
-        )
+        auth = factory.create_auth_info(request["username"], None, request["domain"])
+        auth.password = request["password"]
+        auth.domain = request["domain"]
         auth.tls_cert_path = request["certificate_path"]
         auth.tls_key_path = request["private_key_path"]
         core.add_auth_info(auth)
@@ -228,6 +249,11 @@ class Runtime:
         self.media_path = request.get("media_path")
         self.snapshot_path = request.get("snapshot_path")
         if self.media_path:
+            media_fifo = Path(self.media_path)
+            media_fifo.unlink(missing_ok=True)
+            os.mkfifo(media_fifo, 0o600)
+            # Keep both sides open so Linphone cannot block before PyAV attaches.
+            self.media_guard_fd = os.open(media_fifo, os.O_RDWR | os.O_NONBLOCK)
             params.record_file = self.media_path
         target = self.core.create_address("sip:c100x@" + request["domain"])
         self.call = self.core.invite_address_with_params(target, params, None, None)
@@ -237,9 +263,9 @@ class Runtime:
         self.setup_deadline = now + 15
         self.media_deadline = 0
         self.media_started = False
-        callbacks = linphone.Factory.get().create_call_cbs()
-        callbacks.next_video_frame_decoded = self._next_video_frame_decoded
-        self.call.add_callbacks(callbacks)
+        callbacks = linphone.Factory.get().create_call_listener()
+        callbacks.on_next_video_frame_decoded = self._next_video_frame_decoded
+        self.call.add_listener(callbacks)
         self.call_callbacks = callbacks
         self.call.request_notify_next_video_frame_decoded()
         self.emit("call_state", state="connecting")
@@ -294,9 +320,9 @@ class Runtime:
             raise RuntimeError("not registered")
         room = self.core.get_chat_room_from_uri(request["recipient"])
         message = room.create_message_from_utf8(request["payload"])
-        callbacks = linphone.Factory.get().create_chat_message_cbs()
-        callbacks.msg_state_changed = self._message_state_changed
-        message.add_callbacks(callbacks)
+        callbacks = linphone.Factory.get().create_chat_message_listener()
+        callbacks.on_msg_state_changed = self._message_state_changed
+        message.add_listener(callbacks)
         self.message = message
         message.send()
         self.emit("message_delivery", state="in_progress")
@@ -428,6 +454,9 @@ class Runtime:
         self.media_started = False
         self.call_callbacks = None
         self.media_path = None
+        if self.media_guard_fd is not None:
+            os.close(self.media_guard_fd)
+            self.media_guard_fd = None
         self.snapshot_path = None
         self.emit("microphone", enabled=False)
 
@@ -439,6 +468,9 @@ class Runtime:
         if self.microphone_fd is not None:
             os.close(self.microphone_fd)
             self.microphone_fd = None
+        if self.media_guard_fd is not None:
+            os.close(self.media_guard_fd)
+            self.media_guard_fd = None
         for connection in (self.client, self.server):
             if connection is not None:
                 with contextlib.suppress(OSError):

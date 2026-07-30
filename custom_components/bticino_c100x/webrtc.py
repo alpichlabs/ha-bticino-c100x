@@ -76,8 +76,10 @@ class WebRTCBridge:
         if self._player is not None:
             return
         for _ in range(100):
-            if self.media_path.is_file() and self.media_path.stat().st_size:
-                self._player = MediaPlayer(str(self.media_path), format="matroska")
+            if self.media_path.exists():
+                self._player = await asyncio.to_thread(
+                    MediaPlayer, str(self.media_path), format="matroska"
+                )
                 return
             await asyncio.sleep(0.1)
         raise RuntimeError("Linphone media channel did not become ready")
