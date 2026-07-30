@@ -13,7 +13,13 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from typing import Any
 
-from .const import SIP_PORT, SIP_REGISTER_EXPIRES, SIP_SERVER, SIP_USER_AGENT
+from .const import (
+    SIP_PORT,
+    SIP_REGISTER_EXPIRES,
+    SIP_REREGISTER_SECONDS,
+    SIP_SERVER,
+    SIP_USER_AGENT,
+)
 from .models import SipAccount
 
 
@@ -38,6 +44,46 @@ class SipMessage:
         if self.start_line.startswith("SIP/2.0 "):
             return None
         return self.start_line.split(" ", 1)[0]
+
+
+@dataclass(slots=True)
+class SipDialog:
+    """Established outgoing SIP dialog."""
+
+    call_id: str
+    local_uri: str
+    remote_uri: str
+    local_tag: str
+    remote_to: str
+    remote_target: str
+    route_set: tuple[str, ...]
+    local_sequence: int
+
+
+def _split_header_values(value: str) -> list[str]:
+    """Split comma-separated SIP route values outside angle brackets."""
+    values: list[str] = []
+    start = 0
+    depth = 0
+    for index, character in enumerate(value):
+        if character == "<":
+            depth += 1
+        elif character == ">":
+            depth = max(0, depth - 1)
+        elif character == "," and depth == 0:
+            values.append(value[start:index].strip())
+            start = index + 1
+    if tail := value[start:].strip():
+        values.append(tail)
+    return values
+
+
+def _first_uri(value: str) -> str | None:
+    """Extract the first SIP URI from a name-address header."""
+    if "<" in value and ">" in value:
+        return value.split("<", 1)[1].split(">", 1)[0]
+    clean = value.split(";", 1)[0].strip()
+    return clean or None
 
 
 class SipFramer:
@@ -137,19 +183,23 @@ class SipClient:
         private_key_path: str,
         ca_path: str,
         on_ring: Callable[[dict[str, Any]], Awaitable[None]],
+        on_call_end: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.account = account
         self._certificate_path = certificate_path
         self._private_key_path = private_key_path
         self._ca_path = ca_path
         self._on_ring = on_ring
+        self.on_call_end = on_call_end
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._read_task: asyncio.Task | None = None
+        self._registration_task: asyncio.Task | None = None
         self._pending: dict[tuple[str, str], asyncio.Future[SipMessage]] = {}
         self._background_tasks: set[asyncio.Task] = set()
         self._send_lock = asyncio.Lock()
         self._last_transaction: dict[str, Any] | None = None
+        self._dialog: SipDialog | None = None
         self.registered = False
 
     async def connect(self) -> None:
@@ -164,9 +214,16 @@ class SipClient:
         )
         self._read_task = asyncio.create_task(self._read_loop())
         await self.register()
+        self._registration_task = asyncio.create_task(self._refresh_registration())
 
     async def close(self) -> None:
+        with contextlib.suppress(Exception):
+            await self.end_monitoring()
         self.registered = False
+        if self._registration_task:
+            self._registration_task.cancel()
+            await asyncio.gather(self._registration_task, return_exceptions=True)
+            self._registration_task = None
         if self._read_task:
             self._read_task.cancel()
             await asyncio.gather(self._read_task, return_exceptions=True)
@@ -191,8 +248,11 @@ class SipClient:
 
     async def wait_closed(self) -> None:
         """Wait until the remote connection ends or its reader fails."""
-        if self._read_task:
-            await self._read_task
+        tasks = {task for task in (self._read_task, self._registration_task) if task}
+        if not tasks:
+            return
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        await next(iter(done))
 
     async def register(self) -> None:
         uri = f"sip:{self.account.domain}"
@@ -200,6 +260,11 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"SIP registration failed with status {response.status_code}")
         self.registered = True
+
+    async def _refresh_registration(self) -> None:
+        while True:
+            await asyncio.sleep(SIP_REREGISTER_SECONDS)
+            await self.register()
 
     async def release_door(self, lock_id: str, gateway_id: str) -> None:
         """Release a Classe 100X strike using its topology module ID."""
@@ -227,6 +292,96 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"Door release failed with SIP status {response.status_code}")
 
+    async def start_monitoring(self, offer_sdp: str) -> bytes:
+        """Start one user-initiated monitoring dialog and return its SDP answer."""
+        if self._dialog is not None:
+            raise SipError("A monitoring dialog is already active")
+        uri = f"sip:c100x@{self.account.domain}"
+        response = await self._authenticated_request(
+            "INVITE",
+            uri,
+            offer_sdp.encode(),
+            content_type="application/sdp",
+            extra_headers=("Accept: application/sdp",),
+        )
+        transaction = self._last_transaction or {}
+        if response.status_code != 200:
+            raise SipError(f"Monitoring call failed with SIP status {response.status_code}")
+        if "application/sdp" not in response.headers.get("content-type", "").casefold():
+            raise SipError("Monitoring call returned no SDP answer")
+        remote_to = response.headers.get("to", "")
+        if ";tag=" not in remote_to.casefold():
+            raise SipError("Monitoring call returned no remote dialog tag")
+        contact = _first_uri(response.headers.get("contact", "")) or uri
+        routes = tuple(reversed(_split_header_values(response.headers.get("record-route", ""))))
+        try:
+            dialog = SipDialog(
+                call_id=str(transaction["call_id"]),
+                local_uri=f"sip:{self.account.username}@{self.account.domain}",
+                remote_uri=uri,
+                local_tag=str(transaction["tag"]),
+                remote_to=remote_to,
+                remote_target=contact,
+                route_set=routes,
+                local_sequence=int(transaction["sequence"]),
+            )
+        except KeyError as err:
+            raise SipError("Monitoring transaction state was incomplete") from err
+        self._dialog = dialog
+        await self._send_ack(dialog)
+        return response.body
+
+    async def end_monitoring(self) -> None:
+        """Terminate the active monitoring dialog, if any."""
+        dialog, self._dialog = self._dialog, None
+        if dialog is None or self._writer is None:
+            return
+        dialog.local_sequence += 1
+        response = await self._dialog_request(dialog, "BYE", dialog.local_sequence)
+        if response.status_code not in {200, 481}:
+            raise SipError(f"Monitoring teardown failed with SIP status {response.status_code}")
+
+    async def _send_ack(self, dialog: SipDialog) -> None:
+        await self._dialog_request(dialog, "ACK", dialog.local_sequence, wait=False)
+
+    async def _dialog_request(
+        self, dialog: SipDialog, method: str, sequence: int, *, wait: bool = True
+    ) -> SipMessage:
+        branch = f"z9hG4bK.{secrets.token_hex(8)}"
+        local = "127.0.0.1:5060"
+        headers = [
+            f"Via: SIP/2.0/TLS {local};branch={branch};rport",
+            f"From: <{dialog.local_uri}>;tag={dialog.local_tag}",
+            f"To: {dialog.remote_to}",
+            f"Call-ID: {dialog.call_id}",
+            f"CSeq: {sequence} {method}",
+            "Max-Forwards: 70",
+            f"User-Agent: {SIP_USER_AGENT}",
+            f"Contact: <sip:{self.account.username}@{self.account.domain};transport=tls>",
+        ]
+        headers.extend(f"Route: {route}" for route in dialog.route_set)
+        headers.append("Content-Length: 0")
+        raw = (
+            f"{method} {dialog.remote_target} SIP/2.0\r\n"
+            + "\r\n".join(headers)
+            + "\r\n\r\n"
+        )
+        if not self._writer:
+            raise SipError("SIP connection is not open")
+        if not wait:
+            self._writer.write(raw.encode())
+            await self._writer.drain()
+            return SipMessage("SIP/2.0 200 Local ACK", {})
+        cseq = f"{sequence} {method}"
+        future = asyncio.get_running_loop().create_future()
+        self._pending[(dialog.call_id, cseq)] = future
+        self._writer.write(raw.encode())
+        await self._writer.drain()
+        try:
+            return await asyncio.wait_for(future, timeout=20)
+        finally:
+            self._pending.pop((dialog.call_id, cseq), None)
+
     async def _authenticated_request(
         self,
         method: str,
@@ -248,6 +403,8 @@ class SipClient:
                 content_type=content_type,
                 extra_headers=extra_headers,
             )
+            if method == "INVITE" and first.status_code and first.status_code >= 300:
+                await self._send_failure_ack(uri, transaction, first)
             if first.status_code not in (401, 407):
                 self._last_transaction = transaction
                 return first
@@ -267,8 +424,34 @@ class SipClient:
                 extra_headers=extra_headers,
                 authorization=("Authorization" if first.status_code == 401 else "Proxy-Authorization", authorization),
             )
+            if method == "INVITE" and response.status_code and response.status_code >= 300:
+                await self._send_failure_ack(uri, transaction, response)
             self._last_transaction = transaction
             return response
+
+    async def _send_failure_ack(
+        self, uri: str, transaction: dict[str, Any], response: SipMessage
+    ) -> None:
+        """Acknowledge a non-2xx INVITE final response before retry/teardown."""
+        sequence = int(transaction["sequence"])
+        branch = str(transaction["branch"])
+        headers = [
+            f"Via: SIP/2.0/TLS 127.0.0.1:5060;branch={branch};rport",
+            f"From: {transaction['from']}",
+            f"To: {response.headers.get('to', f'<{uri}>')}",
+            f"Call-ID: {transaction['call_id']}",
+            f"CSeq: {sequence} ACK",
+            "Max-Forwards: 70",
+            f"Route: <sip:{SIP_SERVER};transport=tls;lr>",
+            f"User-Agent: {SIP_USER_AGENT}",
+            "Content-Length: 0",
+        ]
+        if not self._writer:
+            raise SipError("SIP connection is not open")
+        self._writer.write(
+            (f"ACK {uri} SIP/2.0\r\n" + "\r\n".join(headers) + "\r\n\r\n").encode()
+        )
+        await self._writer.drain()
 
     async def _request(
         self,
@@ -290,6 +473,7 @@ class SipClient:
             transaction["sequence"] = sequence
         cseq = f"{sequence} {method}"
         branch = f"z9hG4bK.{secrets.token_hex(8)}"
+        transaction["branch"] = branch
         tag = transaction.setdefault("tag", secrets.token_hex(8))
         local = "127.0.0.1:5060"
         from_uri = f"<sip:{self.account.username}@{self.account.domain}>;tag={tag}"
@@ -368,7 +552,13 @@ class SipClient:
             task = asyncio.create_task(self._delayed_busy(message))
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
-        elif message.method in ("BYE", "CANCEL", "OPTIONS", "MESSAGE"):
+        elif message.method == "BYE":
+            await self._respond(message, 200, "OK")
+            if self._dialog and message.headers.get("call-id") == self._dialog.call_id:
+                self._dialog = None
+                if self.on_call_end:
+                    await self.on_call_end()
+        elif message.method in ("CANCEL", "OPTIONS", "MESSAGE"):
             await self._respond(message, 200, "OK")
 
     async def _delayed_busy(self, message: SipMessage) -> None:

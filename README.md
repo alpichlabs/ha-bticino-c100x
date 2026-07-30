@@ -11,15 +11,16 @@ ringing, without modifying the intercom firmware.
 - Receive live video and intercom audio through a standard Home Assistant camera
 - Use the bundled `bticino-c100x-card` in browsers and Companion App WebViews
 - Keep the microphone disabled until the card's explicit microphone action
-- Share one Linphone call between multiple viewers and clean it up automatically
+- Share one SIP media session between multiple viewers and clean it up automatically
 - Pulse any vendor-visible door release at any time from Home Assistant
 - Receive real-time doorbell events
 - Use doorbell events in automations and Companion App notifications
 - Keep the official Door Entry app operational through a separate SIP account
 - Expose SIP registration and certificate-expiry diagnostics
 
-Staircase lighting is intentionally not included. The first runtime release is
-Linux amd64 only; unsupported architectures fail with a clear diagnostic.
+Staircase lighting is intentionally not included. There is no architecture-specific
+helper: the integration uses the FFmpeg installation supplied with Home Assistant
+OS and Home Assistant Container.
 
 ## Installation
 
@@ -28,9 +29,10 @@ Linux amd64 only; unsupported architectures fail with a clear diagnostic.
 3. Install **BTicino C100X** and restart Home Assistant.
 4. Add the integration from **Settings → Devices & services**.
 
-The integration downloads its checksum-pinned Linphone runtime from the matching
-GitHub release into Home Assistant protected storage. No SIP, RTP, control or
-media port is exposed. In Lovelace storage mode the bundled card resource is
+The integration uses Home Assistant's FFmpeg system integration for received
+H.264 video. SIP signaling, SDES-SRTP audio and microphone mute state remain
+inside the integration; no control or media service is exposed externally. In
+Lovelace storage mode the bundled card resource is
 registered automatically; add a **BTicino C100X Intercom** card and select the
 camera, Start, End and Release entities. The regular camera entity is also usable
 with Home Assistant's native WebRTC player.
@@ -67,11 +69,11 @@ whether the physical door is open.
 Protocol behavior was independently implemented from the Classe 100X API and
 the vendor-signed Door Entry CLASSE100X Android application.
 
-The separately packaged runtime embeds [Linphone 5.4](https://www.linphone.org/)
-and Mediastreamer2 from Belledonne Communications. It is distributed under
-GPLv3 with corresponding source and build instructions attached to its GitHub
-release. The Home Assistant integration remains under this repository's MIT
-license.
+The vendor app uses Linphone, while this interoperability implementation uses
+Home Assistant's existing [FFmpeg](https://ffmpeg.org/) installation for video
+decoding and the MIT/BSD-licensed `aiortc`/`pylibsrtp` Python packages for local
+WebRTC and SRTP handling. This repository remains MIT-licensed and does not
+redistribute FFmpeg or Linphone binaries.
 
 Related community work includes the MIT-licensed
 [`adaofeliz/bticino-door-entry-v1`](https://github.com/adaofeliz/bticino-door-entry-v1),

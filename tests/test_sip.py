@@ -132,3 +132,83 @@ async def test_invite_from_another_gateway_is_declined_without_ring_event() -> N
 
     on_ring.assert_not_awaited()
     client._respond.assert_awaited_once_with(invalid, 486, "Busy Here")
+
+
+async def test_monitoring_dialog_sends_ack_and_bye_to_remote_contact() -> None:
+    account = SipAccount("1", "user@gateway.bs.iotleg.com", "secret", "oid")
+    client = SipClient(account, "certificate", "key", "ca", AsyncMock())
+    writer = MagicMock()
+    writer.drain = AsyncMock()
+    client._writer = writer
+    client._last_transaction = {"call_id": "call-1", "tag": "local", "sequence": 22}
+    client._authenticated_request = AsyncMock(
+        return_value=SipMessage(
+            "SIP/2.0 200 OK",
+            {
+                "content-type": "application/sdp",
+                "to": "<sip:c100x@gateway.bs.iotleg.com>;tag=remote",
+                "contact": "<sip:media@198.51.100.20:5061;transport=tls>",
+                "record-route": "<sip:first;lr>, <sip:second;lr>",
+            },
+            b"v=0\r\n",
+        )
+    )
+
+    answer = await client.start_monitoring("v=0\r\n")
+
+    assert answer == b"v=0\r\n"
+    ack = writer.write.call_args.args[0].decode()
+    assert ack.startswith("ACK sip:media@198.51.100.20:5061;transport=tls SIP/2.0")
+    assert ack.index("Route: <sip:second;lr>") < ack.index("Route: <sip:first;lr>")
+
+    client._dialog_request = AsyncMock(return_value=SipMessage("SIP/2.0 200 OK", {}))
+    await client.end_monitoring()
+    client._dialog_request.assert_awaited_once()
+    assert client._dialog_request.await_args.args[1:] == ("BYE", 23)
+
+
+async def test_authenticated_invite_acknowledges_proxy_challenge_before_retry() -> None:
+    account = SipAccount("1", "user@gateway.bs.iotleg.com", "secret", "oid")
+    client = SipClient(account, "certificate", "key", "ca", AsyncMock())
+    writer = MagicMock()
+    writer.drain = AsyncMock()
+    client._writer = writer
+    responses = iter(
+        (
+            SipMessage(
+                "SIP/2.0 407 Proxy Authentication Required",
+                {
+                    "proxy-authenticate": (
+                        'Digest realm="gateway.bs.iotleg.com", nonce="abc", qop="auth"'
+                    ),
+                    "to": "<sip:c100x@gateway.bs.iotleg.com>;tag=challenge",
+                },
+            ),
+            SipMessage("SIP/2.0 200 OK", {}),
+        )
+    )
+
+    async def request(*_args, **kwargs):
+        transaction = kwargs["transaction"]
+        transaction.setdefault("call_id", "call-1")
+        transaction.setdefault("tag", "local")
+        transaction.setdefault("sequence", 10)
+        transaction["branch"] = "z9hG4bK.test"
+        transaction["from"] = "<sip:user@gateway.bs.iotleg.com>;tag=local"
+        if kwargs.get("authorization"):
+            transaction["sequence"] += 1
+        return next(responses)
+
+    client._request = AsyncMock(side_effect=request)
+
+    response = await client._authenticated_request(
+        "INVITE",
+        "sip:c100x@gateway.bs.iotleg.com",
+        b"v=0\r\n",
+        content_type="application/sdp",
+    )
+
+    assert response.status_code == 200
+    written = b"".join(call.args[0] for call in writer.write.call_args_list).decode()
+    assert "ACK sip:c100x@gateway.bs.iotleg.com SIP/2.0" in written
+    assert "CSeq:" in written and " ACK\r\n" in written

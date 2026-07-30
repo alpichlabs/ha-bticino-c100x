@@ -1,7 +1,5 @@
 """Runtime manager tests."""
 
-import asyncio
-import json
 from unittest.mock import AsyncMock
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -42,19 +40,9 @@ async def test_release_uses_module_id_over_registered_sip(hass) -> None:
     entry.add_to_hass(hass)
     api = AsyncMock()
     manager = C100XManager(hass, entry, AsyncMock(), api)
-    manager._runtime = AsyncMock()
+    manager._sip = AsyncMock()
     manager.registered = True
-
-    async def delivered(*_args) -> None:
-        await manager._runtime_event({"event": "message_delivery", "state": "delivered"})
-
-    manager._runtime.send_strike.side_effect = delivered
 
     await manager.async_release("lock-module")
 
-    recipient, payload = manager._runtime.send_strike.await_args.args
-    assert recipient == "sip:c100x@gateway.bs.iotleg.com"
-    body = json.loads(payload)
-    assert body["method"] == "lock.setStatus"
-    assert body["params"][0]["receiver"]["plant"]["coal"]["id"] == "lock-module"
-    await asyncio.sleep(0)
+    manager._sip.release_door.assert_awaited_once_with("lock-module", "gateway")

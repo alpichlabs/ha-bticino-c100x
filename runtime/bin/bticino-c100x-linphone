@@ -1,7 +1,0 @@
-#!/bin/sh
-set -eu
-RUNTIME_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export PYTHONHOME="$RUNTIME_DIR/python"
-export PYTHONPATH="$RUNTIME_DIR/lib"
-export LD_LIBRARY_PATH="$RUNTIME_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-exec "$RUNTIME_DIR/python/bin/python3" "$RUNTIME_DIR/helper.py" "$@"

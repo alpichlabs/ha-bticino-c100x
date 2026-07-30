@@ -31,10 +31,6 @@ class BticinoC100XCard extends HTMLElement {
         <button data-action="microphone">Microphone</button>
         <button class="release" data-action="release">Release door</button>
       </div><div class="status">Listen-only · microphone off</div></ha-card>`;
-    this.stream = document.createElement("ha-camera-stream");
-    this.stream.controls = true;
-    this.stream.muted = false;
-    this.shadowRoot.querySelector(".media").append(this.stream);
     this.shadowRoot.querySelectorAll("button").forEach((button) =>
       button.addEventListener("click", () => this.action(button.dataset.action))
     );
@@ -46,13 +42,38 @@ class BticinoC100XCard extends HTMLElement {
     try {
       if (entity) {
         await this._hass.callService("button", "press", { entity_id: entity });
-        if (action === "end") await this.disableMicrophone();
+        if (action === "start") this.showStream();
+        if (action === "end") {
+          await this.disableMicrophone();
+          this.hideStream();
+        }
       } else if (this.peer) {
         await this.disableMicrophone();
       } else {
         await this.enableMicrophone();
       }
     } catch (error) { this.setStatus(error.message || String(error), true); }
+  }
+
+  showStream() {
+    if (this.stream) return;
+    this.stream = document.createElement("ha-camera-stream");
+    this.stream.controls = true;
+    this.stream.muted = false;
+    this.stream.hass = this._hass;
+    this.stream.stateObj = this._hass.states[this.config.camera_entity];
+    this.shadowRoot.querySelector(".media").append(this.stream);
+  }
+
+  hideStream() {
+    if (!this.stream) return;
+    this.stream.remove();
+    this.stream = null;
+  }
+
+  disconnectedCallback() {
+    this.disableMicrophone().catch(() => {});
+    this.hideStream();
   }
 
   async enableMicrophone() {
@@ -81,7 +102,7 @@ class BticinoC100XCard extends HTMLElement {
 
   async disableMicrophone() {
     if (!this.peer) return;
-    // Server disables Linphone first; browser capture is stopped only after acknowledgement.
+    // Server disables SRTP transmission first; capture stops only after acknowledgement.
     await this._hass.connection.sendMessagePromise({ type: "bticino_c100x/microphone/set",
       entry_id: this.entryId, owner: this.owner, enabled: false });
     this.microphoneMedia.getTracks().forEach((track) => track.stop());

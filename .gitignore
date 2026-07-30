@@ -5,6 +5,3 @@ __pycache__/
 .venv/
 coverage.xml
 htmlcov/
-
-bticino-c100x-linphone-*.tar.gz
-bticino-c100x-linphone-*.tar.gz.sha256

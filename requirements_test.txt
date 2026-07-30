@@ -5,4 +5,5 @@ aioresponses
 pytest-cov
 PyTurboJPEG==1.8.0
 aiortc==1.15.0
+ha-ffmpeg==3.2.2
 ruff==0.16.0

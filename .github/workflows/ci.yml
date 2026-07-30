@@ -14,21 +14,7 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -r requirements_test.txt
-      - run: ruff check custom_components runtime tests
+      - run: ruff check custom_components tests
       - run: pytest -q
+      - run: RUN_FFMPEG_SRTP_SMOKE=1 pytest -q tests/test_ffmpeg_smoke.py
       - run: node --check custom_components/bticino_c100x/frontend/bticino-c100x-card.js
-
-  test-amd64-runtime:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build runtime from pinned inputs
-        run: runtime/build-runtime.sh
-      - name: Run credential-free IPC smoke test
-        run: |
-          if ! output=$(python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz "$(cut -d ' ' -f 1 bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256)" 2>&1); then
-            encoded=$(printf '%s' "$output" | base64 -w 0)
-            echo "::error title=Linphone runtime smoke test (base64)::$encoded"
-            exit 1
-          fi
-          echo "$output"

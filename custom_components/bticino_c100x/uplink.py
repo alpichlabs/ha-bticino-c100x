@@ -12,7 +12,7 @@ from .media_session import MediaSession
 
 
 class MicrophoneUplink:
-    """Receive browser audio and forward bounded PCM frames to Linphone."""
+    """Receive browser audio and forward bounded PCM frames to SRTP."""
 
     def __init__(self, session: MediaSession) -> None:
         self.session = session
@@ -52,7 +52,7 @@ class MicrophoneUplink:
             except TimeoutError:
                 await self._close_locked()
                 raise RuntimeError("Microphone uplink has no audio track") from None
-            # Enable Linphone only after the browser audio track is established.
+            # Enable SRTP transmission only after the browser track exists.
             await self.session.set_microphone(True)
             assert peer.localDescription
             return peer.localDescription.sdp
@@ -64,7 +64,7 @@ class MicrophoneUplink:
             await self._close_locked()
 
     async def _close_locked(self) -> None:
-        # Safety ordering is intentional: mute Linphone before stopping capture.
+        # Safety ordering is intentional: mute RTP before stopping capture.
         if self.session.microphone_enabled:
             await self.session.set_microphone(False)
         task, self._task = self._task, None
@@ -78,7 +78,7 @@ class MicrophoneUplink:
         self._track_ready.clear()
 
     async def _forward(self, track: Any) -> None:
-        resampler = AudioResampler(format="s16", layout="mono", rate=48000)
+        resampler = AudioResampler(format="s16", layout="mono", rate=8000)
         while True:
             frame = await track.recv()
             for converted in resampler.resample(frame):

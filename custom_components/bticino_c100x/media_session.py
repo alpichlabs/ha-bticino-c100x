@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable
 from enum import StrEnum
 
-from .linphone_runtime import LinphoneRuntime
+from .media_runtime import MediaRuntime
 
 
 class SessionState(StrEnum):
@@ -22,7 +22,7 @@ class MediaSession:
 
     def __init__(
         self,
-        runtime: LinphoneRuntime,
+        runtime: MediaRuntime,
         notify: Callable[[], None],
         domain: str = "",
         media_path=None,
