@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from homeassistant.components.camera import Camera, CameraEntityFeature, WebRTCAnswer
@@ -50,6 +51,15 @@ class C100XCamera(C100XEntity, Camera):
         if not path.is_file():
             return None
         return await self.hass.async_add_executor_job(path.read_bytes)
+
+    async def handle_async_mjpeg_stream(self, request):
+        """Serve continuously refreshed frames over Home Assistant HTTPS."""
+        path = Path(self.manager._material_dir, "snapshot.jpg")
+        for _ in range(150):
+            if path.is_file():
+                return await super().handle_async_mjpeg_stream(request)
+            await asyncio.sleep(0.1)
+        return None
 
     @property
     def is_streaming(self) -> bool:
