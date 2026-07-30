@@ -68,7 +68,12 @@ class WebRTCBridge:
         self._video_source: MediaStreamTrack | None = None
         self._relay = MediaRelay()
         self._peers: dict[str, RTCPeerConnection] = {}
+        self._pending_candidates: dict[str, list[Any]] = {}
         self._lock = asyncio.Lock()
+
+    def prepare(self, session_id: str) -> None:
+        """Register a browser session before the slower SIP setup begins."""
+        self._pending_candidates.setdefault(session_id, [])
 
     async def answer(self, session_id: str, offer_sdp: str) -> str:
         async with self._lock:
@@ -99,6 +104,9 @@ class WebRTCBridge:
                 await peer.setRemoteDescription(
                     RTCSessionDescription(sdp=offer_sdp, type="offer")
                 )
+                pending = self._pending_candidates.pop(session_id, [])
+                for candidate in pending:
+                    await self._apply_candidate(peer, candidate)
                 _LOGGER.warning(
                     "BTicino WebRTC browser offer: %s", _candidate_summary(offer_sdp)
                 )
@@ -119,15 +127,27 @@ class WebRTCBridge:
                 return peer.localDescription.sdp
             except Exception:
                 self._peers.pop(session_id, None)
+                self._pending_candidates.pop(session_id, None)
                 self.viewer_changed(-1)
                 await peer.close()
                 raise
 
     async def add_candidate(self, session_id: str, value: Any) -> None:
         peer = self._peers.get(session_id)
-        if peer is None:
+        if session_id not in self._pending_candidates and peer is None:
             _LOGGER.warning("BTicino WebRTC candidate ignored: unknown session")
             return
+        if peer is None or peer.remoteDescription is None:
+            pending = self._pending_candidates.setdefault(session_id, [])
+            if len(pending) < 64:
+                pending.append(value)
+            else:
+                _LOGGER.warning("BTicino WebRTC candidate queue is full")
+            return
+        await self._apply_candidate(peer, value)
+
+    async def _apply_candidate(self, peer: RTCPeerConnection, value: Any) -> None:
+        """Apply one browser ICE candidate after the offer is installed."""
         raw = getattr(value, "candidate", None)
         if not raw:
             _LOGGER.warning("BTicino WebRTC browser candidates complete")
@@ -145,6 +165,7 @@ class WebRTCBridge:
 
     async def close(self, session_id: str) -> None:
         async with self._lock:
+            self._pending_candidates.pop(session_id, None)
             peer = self._peers.pop(session_id, None)
             if peer is None:
                 return

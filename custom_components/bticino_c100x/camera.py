@@ -67,9 +67,14 @@ class C100XCamera(C100XEntity, Camera):
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
     ) -> None:
         """Treat a live-player offer as an explicit user monitoring action."""
-        await self.manager.async_start_monitoring(self._camera_id)
-        answer = await self._bridge.answer(session_id, offer_sdp)
-        send_message(WebRTCAnswer(answer=answer))
+        self._bridge.prepare(session_id)
+        try:
+            await self.manager.async_start_monitoring(self._camera_id)
+            answer = await self._bridge.answer(session_id, offer_sdp)
+            send_message(WebRTCAnswer(answer=answer))
+        except Exception:
+            await self._bridge.close(session_id)
+            raise
 
     async def async_on_webrtc_candidate(
         self, session_id: str, candidate: RTCIceCandidateInit
