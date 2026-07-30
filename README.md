@@ -41,6 +41,8 @@ RTP and RTCP endpoints are discovered through the same Linphone STUN service
 used by the vendor app. The integration advertises the mapped endpoints and
 opens symmetric UDP paths before media reception, so Home Assistant Container
 deployments do not expose container-private addresses in the monitoring offer.
+The browser-facing WebRTC peer uses STUN as well, allowing the camera player to
+reach an integration running on a Docker bridge.
 
 ```yaml
 type: custom:bticino-c100x-card

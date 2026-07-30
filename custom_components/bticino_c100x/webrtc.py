@@ -7,7 +7,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    MediaStreamTrack,
+    RTCConfiguration,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
@@ -63,7 +69,11 @@ class WebRTCBridge:
     async def answer(self, session_id: str, offer_sdp: str) -> str:
         async with self._lock:
             await self._ensure_player()
-            peer = RTCPeerConnection()
+            peer = RTCPeerConnection(
+                RTCConfiguration(
+                    iceServers=[RTCIceServer(urls="stun:stun.linphone.org:3478")]
+                )
+            )
             self._peers[session_id] = peer
             self.viewer_changed(1)
 
