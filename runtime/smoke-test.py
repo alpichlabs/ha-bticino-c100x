@@ -50,9 +50,12 @@ def main() -> None:
                     "version": "0.1.0",
                     "linphone": "5.4",
                 }
-                client.sendall(b'{"id":2,"command":"shutdown"}\n')
+                client.sendall(b'{"id":2,"command":"self_test"}\n')
+                self_test = json.loads(reader.readline())
+                assert self_test == {"id": 2, "binding": "ok"}
+                client.sendall(b'{"id":3,"command":"shutdown"}\n')
                 shutdown = json.loads(reader.readline())
-                assert shutdown == {"id": 2}
+                assert shutdown == {"id": 3}
                 reader.close()
             if process.wait(timeout=5) != 0:
                 raise SystemExit("runtime shutdown failed")

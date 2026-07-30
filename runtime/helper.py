@@ -39,6 +39,9 @@ class Runtime:
         self.shutdown_requested = False
         self.core = None
         self.call = None
+        self.incoming_call = None
+        self.incoming_deadline = 0.0
+        self.domain: str | None = None
         self.message = None
         self.call_callbacks = None
         self.setup_deadline = 0.0
@@ -126,6 +129,38 @@ class Runtime:
     def command_hello(self, _request: dict[str, Any]) -> dict[str, Any]:
         return {"protocol": PROTOCOL, "version": VERSION, "linphone": "5.4"}
 
+    def command_self_test(self, _request: dict[str, Any]) -> dict[str, Any]:
+        """Exercise the exact binding surface without network or credentials."""
+        factory = linphone.Factory.get()
+        core = factory.create_core(None, None, None)
+        required_core = (
+            "add_auth_info",
+            "add_proxy_config",
+            "create_address",
+            "create_auth_info",
+            "create_call_params",
+            "create_proxy_config",
+            "invite_address_with_params",
+            "set_media_encryption_mandatory",
+            "set_user_agent",
+        )
+        if not all(hasattr(core, name) for name in required_core):
+            raise RuntimeError("Linphone Core API mismatch")
+        params = core.create_call_params(None)
+        required_params = (
+            "add_custom_sdp_attribute",
+            "audio_direction",
+            "media_encryption",
+            "mic_enabled",
+            "record_file",
+            "video_direction",
+        )
+        if not all(hasattr(params, name) for name in required_params):
+            raise RuntimeError("Linphone CallParams API mismatch")
+        if not hasattr(factory, "create_call_cbs") or not hasattr(factory, "create_chat_message_cbs"):
+            raise RuntimeError("Linphone callback API mismatch")
+        return {"binding": "ok"}
+
     def command_register(self, request: dict[str, Any]) -> None:
         if self.core is not None:
             raise RuntimeError("already configured")
@@ -156,6 +191,7 @@ class Runtime:
         core.play_file = str(microphone_path)
 
         identity = core.create_address("sip:" + request["sip_uri"])
+        self.domain = request["domain"]
         proxy = core.create_proxy_config()
         proxy.identity_address = identity
         proxy.server_addr = request["proxy"]
@@ -279,7 +315,13 @@ class Runtime:
 
     def _call_state_changed(self, _core, call, state, _message) -> None:
         if state == linphone.CallState.IncomingReceived:
+            remote = call.remote_address.as_string_uri_only().casefold()
+            if not self.domain or f"c100x@{self.domain}".casefold() not in remote:
+                self.core.decline_call(call, linphone.Reason.Busy)
+                return
             self.emit("ring", call_id=call.call_log.call_id or "")
+            self.incoming_call = call
+            self.incoming_deadline = time.monotonic() + 2
             return
         names = {
             linphone.CallState.OutgoingInit: "outgoing_init",
@@ -335,6 +377,10 @@ class Runtime:
 
     def _watchdogs(self) -> None:
         now = time.monotonic()
+        if self.incoming_call is not None and now >= self.incoming_deadline:
+            self.core.decline_call(self.incoming_call, linphone.Reason.Busy)
+            self.incoming_call = None
+            self.incoming_deadline = 0
         if self.call is not None and self.media_started:
             audio = float(self.call.audio_stats.download_bandwidth)
             video = float(self.call.video_stats.download_bandwidth)
