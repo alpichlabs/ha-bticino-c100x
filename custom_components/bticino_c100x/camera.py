@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from homeassistant.components.camera import Camera, CameraEntityFeature, WebRTCAnswer
-from homeassistant.components.camera.webrtc import WebRTCSendMessage
+from homeassistant.components.camera.webrtc import (
+    WebRTCClientConfiguration,
+    WebRTCSendMessage,
+)
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from webrtc_models import RTCIceCandidateInit
+from webrtc_models import RTCConfiguration, RTCIceCandidateInit, RTCIceServer
 
 from . import C100XConfigEntry
 from .entity import C100XEntity
@@ -51,6 +54,14 @@ class C100XCamera(C100XEntity, Camera):
     def is_streaming(self) -> bool:
         session = self.manager.media_session
         return bool(session and session.state == "streaming" and session.device_address == self._camera_id)
+
+    def _async_get_webrtc_client_configuration(self) -> WebRTCClientConfiguration:
+        """Give remote browsers a server-reflexive ICE candidate."""
+        return WebRTCClientConfiguration(
+            configuration=RTCConfiguration(
+                ice_servers=[RTCIceServer(urls="stun:stun.linphone.org:3478")]
+            )
+        )
 
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
