@@ -32,6 +32,9 @@ class FakeCertificateApi:
         )
         return {"cert": base64.b64encode(certificate.public_bytes(serialization.Encoding.DER)).decode()}
 
+    async def certificate_authority(self) -> dict:
+        return {"chain": base64.b64encode(b"test-ca-chain").decode()}
+
 
 async def test_provisioning_keeps_private_key_local() -> None:
     api = FakeCertificateApi()
@@ -53,9 +56,10 @@ async def test_provisioning_keeps_private_key_local() -> None:
     private_key = serialization.load_pem_private_key(bundle.private_key_pem.encode(), password=None)
     assert certificate.public_key().public_numbers() == private_key.public_key().public_numbers()
     assert "PRIVATE KEY" not in str(api.request)
-    assert api.request["template"] == "sipuser-DIY"
+    assert api.request["template"] == "sipuser"
+    assert certificate.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)[0].value == "C100X"
+    assert "BEGIN CERTIFICATE" in bundle.ca_pem
     san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert san.get_values_for_type(x509.UniformResourceIdentifier) == [
         "sip:owner_1234567890123456789012@gateway.bs.iotleg.com"
     ]
-

@@ -9,7 +9,13 @@ from typing import Any
 import aiohttp
 
 from .auth import C100XAuth
-from .const import API_BASE, API_SUBSCRIPTION_KEY
+from .const import (
+    API_BASE,
+    API_SUBSCRIPTION_KEY,
+    CERTIFICATE_CLIENT_ID,
+    CERTIFICATE_CLIENT_SECRET,
+    CERTIFICATE_TENANT_ID,
+)
 from .models import SipAccount
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,7 +101,47 @@ class LegrandApi:
         return SipAccount.from_api(value)
 
     async def provision_certificate(self, request: dict) -> dict:
-        return await self._request("POST", "/certificate/api/v1.0/ca/information/clientCerts", request)
+        return await self._certificate_request("POST", "clientCerts", request)
+
+    async def certificate_authority(self) -> dict:
+        """Fetch the private CA chain installed by the official app."""
+        return await self._certificate_request("GET", "CACerts")
+
+    async def _application_token(self) -> str:
+        url = f"https://login.microsoftonline.com/{CERTIFICATE_TENANT_ID}/oauth2/token"
+        data = {
+            "client_id": CERTIFICATE_CLIENT_ID,
+            "client_secret": CERTIFICATE_CLIENT_SECRET,
+            "grant_type": "client_credentials",
+        }
+        async with self._session.post(
+            url, params={"resource": CERTIFICATE_CLIENT_ID}, data=data
+        ) as response:
+            value = await response.json(content_type=None)
+        if response.status >= 400 or not value.get("access_token"):
+            raise ApiError(response.status, "POST certificate application token")
+        return str(value["access_token"])
+
+    async def _certificate_request(
+        self, method: str, resource: str, payload: dict | None = None
+    ) -> dict:
+        user_token = await self._auth.access_token()
+        application_token = await self._application_token()
+        headers = {
+            "Authorization": f"Bearer {application_token}",
+            "UserToken": user_token,
+            "Ocp-Apim-Subscription-Key": API_SUBSCRIPTION_KEY,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        url = f"{API_BASE}/certificate/api/v1.0/ca/information/{resource}"
+        async with self._session.request(
+            method, url, headers=headers, json=payload
+        ) as response:
+            value = await response.json(content_type=None)
+        if response.status >= 400:
+            raise ApiError(response.status, f"{method} certificate {resource}")
+        return value
 
 
 def _response_summary(value: Any) -> str:

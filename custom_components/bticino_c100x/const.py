@@ -11,6 +11,9 @@ CONF_LOCK_IDS = "lock_ids"
 
 API_BASE = "https://api.developer.legrand.com"
 API_SUBSCRIPTION_KEY = "f36968e522bf4ec3877fa491109d3d14"
+CERTIFICATE_TENANT_ID = "199686b5-bef4-4960-8786-7a6b1888fee3"
+CERTIFICATE_CLIENT_ID = "c7d272d9-e76a-41b7-824f-a988ad964cf8"
+CERTIFICATE_CLIENT_SECRET = "6COxJs+avzPS1/kwr0+DWnNqmej4cw8GArR5AGJtgMc="
 
 B2C_BASE = "https://eliotclouduamprd.b2clogin.com"
 B2C_TENANT = "EliotClouduamprd.onmicrosoft.com"
@@ -27,9 +30,9 @@ SIP_REREGISTER_SECONDS = 480
 SIP_RECONNECT_SECONDS = 10
 SIP_USER_AGENT = "ha-bticino-c100x/0.1"
 
-# Legrand's public third-party Door Entry certificate profile.
-CERTIFICATE_TEMPLATE = "sipuser-DIY"
-CERTIFICATE_ORGANIZATIONAL_UNIT = "DIY"
+# Certificate profile used by the official Classe 100X application.
+CERTIFICATE_TEMPLATE = "sipuser"
+CERTIFICATE_ORGANIZATIONAL_UNIT = "C100X"
 CERTIFICATE_RENEWAL_DAYS = 30
 
 RING_ACTIVE_SECONDS = 5

@@ -12,7 +12,7 @@ from custom_components.bticino_c100x.const import (
 )
 
 
-async def test_entry_creates_only_requested_entities(hass, enable_custom_integrations) -> None:
+async def test_entry_creates_only_vendor_visible_entities(hass, enable_custom_integrations) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Front entrance",
@@ -27,12 +27,19 @@ async def test_entry_creates_only_requested_entities(hass, enable_custom_integra
     )
     entry.add_to_hass(hass)
 
-    with patch("custom_components.bticino_c100x.C100XManager.async_start", new=AsyncMock()):
+    async def start_with_aligned_topology(manager):
+        manager.lock_ids = ["door"]
+
+    with patch(
+        "custom_components.bticino_c100x.C100XManager.async_start",
+        autospec=True,
+        side_effect=start_with_aligned_topology,
+    ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
     assert hass.states.get("button.front_entrance_release_door") is not None
-    assert len(hass.states.async_entity_ids("button")) == 3
+    assert len(hass.states.async_entity_ids("button")) == 1
     assert not hass.states.async_entity_ids("lock")
     assert hass.states.get("binary_sensor.front_entrance_ringing") is not None
     assert hass.states.get("event.front_entrance_doorbell") is not None

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import aiohttp
@@ -16,6 +15,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from .api import ApiError, LegrandApi
 from .auth import AuthenticationError, C100XAuth
 from .const import CONF_GATEWAY_ID, CONF_HOME_ID, CONF_LOCK_IDS, DOMAIN
+from .topology import button_id, open_address, visible_lock_modules
 
 
 class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -72,7 +72,7 @@ class C100XConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         finally:
             session.detach()
         gateway = next((module for module in modules if module.get("device") == "gateway"), None)
-        locks = [module for module in modules if module.get("device") == "lock"]
+        locks = visible_lock_modules(modules)
         if not gateway or not locks:
             return self.async_abort(reason="unsupported_installation")
         self._home_id = home_id
@@ -145,7 +145,7 @@ class C100XOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="cannot_connect")
         finally:
             session.detach()
-        self._choices = _lock_choices([module for module in modules if module.get("device") == "lock"])
+        self._choices = _lock_choices(visible_lock_modules(modules))
         return self.async_show_form(step_id="init", data_schema=self._schema())
 
     def _schema(self):
@@ -161,31 +161,10 @@ def _lock_label(module: dict, index: int) -> str:
     """Build a useful, non-sensitive label for a release module."""
     name = str(module.get("name") or "").strip()
     details: list[str] = []
-    button_id: str | None = None
-    for tag in module.get("tags", []):
-        if tag.get("key") != "PrivateAddress":
-            continue
-        try:
-            address = json.loads(tag.get("value", "{}"))
-        except (TypeError, ValueError):
-            continue
-        values = address.get("addressValues", [])
-        if open_address := next((item.get("value") for item in values if item.get("name") == "address"), None):
-            details.append(f"address {open_address}")
-        if button_id := address.get("buttonId"):
-            button_id = str(button_id)
-            details.append(f"button {button_id}")
-        break
-    # On Classe 100X, control 6 is the dedicated door-lock release key;
-    # control 5 belongs to the configurable-key group and may legitimately
-    # target an additional lock. Keep every module selectable because a real
-    # installation can contain more than one strike.
-    if button_id == "6":
-        label = "Main door release"
-    elif button_id == "5":
-        label = name or "Programmable door release"
-    else:
-        label = name or f"Door release {index}"
+    if address := open_address(module):
+        details.append(f"address {address}")
+    details.append(f"button {button_id(module)}")
+    label = name or f"Door release {index}"
     return f"{label} ({', '.join(details)})" if details else label
 
 

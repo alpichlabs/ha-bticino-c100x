@@ -64,6 +64,7 @@ async def provision_certificate(
             "template": CERTIFICATE_TEMPLATE,
         }
     )
+    ca_response = await api.certificate_authority()
     encoded_certificate = str(response["cert"])
     certificate_pem = (
         "-----BEGIN CERTIFICATE-----\n"
@@ -76,11 +77,19 @@ async def provision_certificate(
         serialization.NoEncryption(),
     ).decode()
     certificate = x509.load_pem_x509_certificate(certificate_pem.encode())
+    encoded_ca = str(ca_response["chain"])
+    ca_pem = (
+        "-----BEGIN CERTIFICATE-----\n"
+        + "\n".join(
+            encoded_ca[index : index + 64]
+            for index in range(0, len(encoded_ca), 64)
+        )
+        + "\n-----END CERTIFICATE-----\n"
+    )
     expires_at = certificate.not_valid_after_utc.astimezone(UTC)
-    return CertificateBundle(certificate_pem, private_key_pem, expires_at)
+    return CertificateBundle(certificate_pem, private_key_pem, ca_pem, expires_at)
 
 
 def certificate_expiry(certificate_pem: str) -> datetime:
     """Return the timezone-aware certificate expiry."""
     return x509.load_pem_x509_certificate(certificate_pem.encode()).not_valid_after_utc
-

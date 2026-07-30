@@ -148,7 +148,15 @@ Actuators are topology modules. A lock/strike module ID is not the gateway ID. T
 
 During cloud alignment, the app maps `deviceType` values to its local database as follows: `Lock` → CID `10060`, `SecureLock` → `10070`, `Staircase` → `2009`, `EU` → `10050`, `netatmo_cam` → `10061`, and `IU` → an intercom type. A separate legacy database query selects CIDs `3008` and `2009`, while the action dispatcher accepts both `10060` and `3008` for `lock.setStatus`. It does not accept `10070` in that dispatcher.
 
-Most importantly, the official app sets both the local `deviceAddr` and the JSON-RPC receiver parameter from the cloud module's `id`. A `PrivateAddress` tag is parsed only for `buttonId` and `visible` UI metadata in this flow. Values such as `21` or `22` nested in that tag are not used as the receiver of `lock.setStatus`. Each current cloud `Lock` module must therefore remain a distinct selectable strike; only modules absent from the latest topology are stale.
+Most importantly, the official app sets both the local `deviceAddr` and the JSON-RPC receiver parameter from the cloud module's `id`. A `PrivateAddress` tag is parsed for `buttonId` and `visible` UI metadata in this flow. Values such as `21` or `22` nested in that tag are not used as the receiver of `lock.setStatus`.
+
+The official lock query applies the following exact selection rule before it creates the release controls:
+
+1. the aligned device CID must be `10060` (`Lock`);
+2. `PrivateAddress.visible` must equal `1` or `2`;
+3. all matching locks are retained and ordered by numeric `PrivateAddress.buttonId`.
+
+Consequently, a topology may legitimately contain several current cloud `Lock` modules while the app displays only one. Hidden records (`visible=0`) are not user-selectable strikes even though they are still present in the service catalogue. Conversely, an installation with two locks marked visible must expose both; the integration must not collapse them to one.
 
 ### SIP accounts
 
@@ -296,7 +304,22 @@ For incoming calls it accepts early media before the user answers. When the remo
 
 The app's “view entrance” operation starts an outgoing SIP call to the short target `c100x`. Linphone resolves it in the active identity domain, yielding `sip:c100x@<gatewayId>.bs.iotleg.com`. The SDP carries `DEVADDR=<selected EU module id>`. Netatmo/TVCC entries add `TVCC=1`. The remote answer can return `DEVADDR`, which the UI records as the active entrance/camera. This is separate from the strike receiver but uses the same cloud module-ID addressing convention.
 
-Exact negotiated codecs, payload types, ICE behavior, and SRTP keying are **Unknown** from this high-level Java trace because those details are delegated to the bundled Linphone native library and runtime SDP negotiation. They should be captured from a consented test call before claiming media compatibility.
+Codec ordering, payload types, NAT traversal, SRTP keying, SIP dialog state, and RTP processing are deliberately delegated to the bundled Linphone stack. They are not application-defined packet templates. A compatible implementation must use Linphone 5.4 behavior for negotiation and media instead of generating a guessed SDP offer or implementing SRTP/RTP independently.
+
+The app's exact outgoing Classe 100X monitoring sequence is **Confirmed**:
+
+1. require Linphone registration state `Ok` and an active network;
+2. interpret the short destination `c100x` through the default proxy identity;
+3. create fresh `CallParams` and apply the app's quality helper;
+4. enable video with direction `RecvOnly`;
+5. set audio to `SendRecv` for a normal `EU`, or `Inactive` only for a `TVCC=1` camera;
+6. add `DEVADDR=<selected visible EU module id>` as a custom session-level SDP attribute;
+7. call Linphone `inviteAddressWithParams` and retain its returned call object;
+8. request notification of the next decoded video frame and attach a call listener;
+9. render decoded video through Linphone's native video-window output;
+10. terminate calls with no audio or video download bandwidth for ten seconds.
+
+The app does not create a manual SIP `INVITE`, choose an H.264 payload type, calculate SRTP keys, or parse RTP packets itself.
 
 ## Door release and other JSON-RPC commands
 
@@ -351,7 +374,7 @@ The minimum remote flow inferred from the app is:
 
 1. Complete B2C sign-in and retain a refresh token securely.
 2. Fetch the user’s plants and current topology.
-3. Select the Classe 100X gateway module and retain all current lock modules associated with it.
+3. Select the Classe 100X gateway and retain every `Lock` whose `PrivateAddress.visible` is `1` or `2`, ordered by `buttonId`.
 4. Fetch or create a SIP account tied to a stable client ID.
 5. Generate a local P-256 key and provision a SIP client certificate; renew it before the 30-day pre-expiry check fails.
 6. Connect to the production SIP proxy over TLS and register the account.
@@ -373,25 +396,24 @@ The minimum remote flow inferred from the app is:
 A direct test against a real Classe 100X account was performed outside Home Assistant. No `lock.setStatus` message was sent, no strike was actuated, and the media offer was receive-only. Identifiers and credentials are intentionally omitted.
 
 - The gateway reported model `bs-classe100x`, firmware `1.5.8`, hardware `02.07.0`, `CONNECTED`, and `on`.
-- The global and plant-scoped module endpoints both returned the same eight records: one gateway, three locks, one light, and three audio/video terminals. The three terminal roles were one `IU` and two `EU`. This confirms that multiple cloud lock records cannot be collapsed merely because the installation has one physical entrance; stale-record reconciliation needs stronger evidence.
+- The topology contained three current cloud lock records, but the official app rule selected only the one whose `PrivateAddress.visible` was `2`; the other two had `visible=0`. This independently correlates the recovered database/UI selection rule without collapsing installations that genuinely contain several visible locks.
 - The account already had three SIP clients. Attempting to create a fourth returned HTTP 400, so the test reused the existing dedicated integration client without involving the Home Assistant runtime.
 - Certificate provisioning with the recovered official-app headers, `sipuser` template, and `OU=C100X` succeeded. The client certificate SAN matched the SIP URI, its issuer was the Legrand production non-public CA, and its lifetime was approximately one year. The returned CA chain expires in 2036.
 - The repository SIP client completed authenticated TLS/Digest registration successfully with the newly provisioned certificate.
-- A receive-only monitoring `INVITE` targeting an `EU` terminal received the expected proxy `407`, followed by authenticated `200 OK`. The answer disabled audio (`m=audio 0`) and offered H.264 video over SRTP as `sendonly`. This proves direct camera-session signaling without a ring or strike command. The verifier failed before counting encrypted UDP packets, so end-to-end media reception and decoding remain unverified. An immediate retry received `486 Busy Here`, consistent with the first dialog still awaiting timeout.
 
 The test also confirms the corrected certificate-header split documented above: `Authorization` carries the application token and `UserToken` carries the user access token.
 
 ## What remains unverified
 
-Static analysis gives high confidence in endpoint construction and control flow, but it is not a substitute for a protocol capture. The following still require a user-authorized, redacted test session:
+Static analysis gives high confidence in endpoint construction and control flow. The following remain outside the claims made by this reference:
 
 - full request/response schemas and optional fields returned by every cloud endpoint;
-- packet-level confirmation of the inferred `text/plain` SIP `MESSAGE` content type and the final response sequence across every proxy node;
-- encrypted RTP reception/decoding, NAT behavior across networks, and camera-switch responses;
+- Linphone-internal serialization details that the application intentionally delegates to its bundled native stack;
+- compatibility of a future packaged Linux Linphone runtime on every Home Assistant architecture;
 - whether the gateway returns an application-level JSON-RPC result after strike execution;
 - certificate lifetime and renewal behavior for every certificate template/account age.
 
-Claims in this document should be updated from captured evidence, with personal data and credentials removed, rather than guessed.
+Missing application behavior must be resolved from the vendor application and its exact dependency versions, with personal data and credentials removed, rather than guessed through live actuation or ad-hoc protocol probes.
 
 ## Reproducibility map
 

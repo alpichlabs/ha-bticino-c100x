@@ -31,6 +31,7 @@ from .const import (
 )
 from .models import SipAccount
 from .sip import SipClient, SipError
+from .topology import visible_external_units, visible_lock_modules
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ class C100XManager:
         self.last_ring: datetime | None = None
         self.certificate_expires_at: datetime | None = None
         self.last_error: str | None = None
+        self.lock_ids: list[str] = []
+        self.camera_ids: list[str] = []
         self._listeners: set[Callable[[], None]] = set()
         self._ring_listeners: set[Callable[[dict[str, Any]], None]] = set()
         self._seen_call_ids: set[str] = set()
@@ -64,8 +67,14 @@ class C100XManager:
         self._material_dir = Path(hass.config.path(".storage", DOMAIN, entry.entry_id))
         self._certificate_path = self._material_dir / "client.crt"
         self._private_key_path = self._material_dir / "client.key"
+        self._ca_path = self._material_dir / "ca-chain.crt"
 
     async def async_start(self) -> None:
+        modules = await self.api.modules(self.entry.data[CONF_HOME_ID])
+        self.lock_ids = [str(module["id"]) for module in visible_lock_modules(modules)]
+        self.camera_ids = [str(module["id"]) for module in visible_external_units(modules)]
+        if not self.lock_ids:
+            raise SipError("No official-app-visible door release was found")
         account = await self._prepare_account_and_certificate()
         await self._connect(account)
         self._supervisor = asyncio.create_task(self._supervise(account), name=f"{DOMAIN}-{self.entry.entry_id}")
@@ -132,13 +141,17 @@ class C100XManager:
                 self._write_material,
                 bundle.certificate_pem,
                 bundle.private_key_pem,
+                bundle.ca_pem,
             )
             self.certificate_expires_at = bundle.expires_at
         await self._store.async_save({"client_id": client_id})
         return account
 
     def _certificate_is_current(self) -> bool:
-        if not self._certificate_path.is_file() or not self._private_key_path.is_file():
+        if not all(
+            path.is_file()
+            for path in (self._certificate_path, self._private_key_path, self._ca_path)
+        ):
             return False
         try:
             self.certificate_expires_at = certificate_expiry(self._certificate_path.read_text())
@@ -146,19 +159,24 @@ class C100XManager:
             return False
         return self.certificate_expires_at > datetime.now(UTC) + timedelta(days=CERTIFICATE_RENEWAL_DAYS)
 
-    def _write_material(self, certificate_pem: str, private_key_pem: str) -> None:
+    def _write_material(
+        self, certificate_pem: str, private_key_pem: str, ca_pem: str
+    ) -> None:
         self._material_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._material_dir.chmod(0o700)
         self._certificate_path.write_text(certificate_pem)
         self._private_key_path.write_text(private_key_pem)
+        self._ca_path.write_text(ca_pem)
         self._certificate_path.chmod(0o600)
         self._private_key_path.chmod(0o600)
+        self._ca_path.chmod(0o600)
 
     async def _connect(self, account: SipAccount) -> None:
         client = SipClient(
             account,
             str(self._certificate_path),
             str(self._private_key_path),
+            str(self._ca_path),
             self._async_ring,
         )
         await client.connect()

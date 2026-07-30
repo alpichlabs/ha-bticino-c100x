@@ -5,12 +5,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import C100XConfigEntry
-from .const import CONF_LOCK_IDS
 from .entity import C100XEntity
 
 
 async def async_setup_entry(entry_hass, entry: C100XConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    lock_ids = entry.options.get(CONF_LOCK_IDS, entry.data[CONF_LOCK_IDS])
+    lock_ids = entry.runtime_data.manager.lock_ids
     selected_unique_ids = {f"{entry.entry_id}-{lock_id}" for lock_id in lock_ids}
     registry = er.async_get(entry_hass)
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):

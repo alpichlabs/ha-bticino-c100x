@@ -14,6 +14,7 @@ class SipAccount:
     sip_uri: str
     sip_password: str
     user_oid: str
+    client_name: str = ""
 
     @property
     def username(self) -> str:
@@ -30,6 +31,7 @@ class SipAccount:
             sip_uri=str(value["sipUri"]).removeprefix("sip:"),
             sip_password=str(value["sipPassword"]),
             user_oid=str(value.get("userOid", "")),
+            client_name=str(value.get("clientName", "")),
         )
 
 
@@ -39,5 +41,5 @@ class CertificateBundle:
 
     certificate_pem: str
     private_key_pem: str
+    ca_pem: str
     expires_at: datetime
-

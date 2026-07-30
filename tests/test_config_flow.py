@@ -22,7 +22,7 @@ def test_lock_choices_include_open_address_and_button() -> None:
     assert _lock_choices(modules) == {"release-id": "Door release 1 (address 20, button 1)"}
 
 
-def test_lock_choices_identify_classe_100x_dedicated_release_key() -> None:
+def test_lock_choices_use_names_and_official_button_order_metadata() -> None:
     modules = [
         {
             "id": "main-release-id",
@@ -59,6 +59,6 @@ def test_lock_choices_identify_classe_100x_dedicated_release_key() -> None:
     ]
 
     assert _lock_choices(modules) == {
-        "main-release-id": "Main door release (address 22, button 6)",
+        "main-release-id": "Lock (address 22, button 6)",
         "additional-release-id": "Gate (address 21, button 5)",
     }

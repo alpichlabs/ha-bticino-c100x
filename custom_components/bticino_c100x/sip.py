@@ -59,7 +59,12 @@ class SipFramer:
             for line in lines[1:]:
                 if ":" in line:
                     name, value = line.split(":", 1)
-                    headers[name.lower().strip()] = value.strip()
+                    key = name.lower().strip()
+                    clean_value = value.strip()
+                    if key == "record-route" and key in headers:
+                        headers[key] = f"{headers[key]}, {clean_value}"
+                    else:
+                        headers[key] = clean_value
             length = int(headers.get("content-length", "0"))
             total = header_end + 4 + length
             if len(self._buffer) < total:
@@ -70,15 +75,13 @@ class SipFramer:
         return messages
 
 
-def _create_ssl_context(certificate_path: str, private_key_path: str) -> ssl.SSLContext:
+def _create_ssl_context(
+    certificate_path: str, private_key_path: str, ca_path: str
+) -> ssl.SSLContext:
     """Create the SIP TLS context outside Home Assistant's event loop."""
-    context = ssl.create_default_context()
-    # The dedicated Legrand SIP endpoint uses a private, self-signed server
-    # certificate chain. Limit relaxed verification to this single pinned
-    # hostname; mutual TLS still authenticates this client with the
-    # short-lived certificate provisioned by Legrand.
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+    context = ssl.create_default_context(cafile=ca_path)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
     context.load_cert_chain(certificate_path, private_key_path)
     return context
 
@@ -132,11 +135,13 @@ class SipClient:
         account: SipAccount,
         certificate_path: str,
         private_key_path: str,
+        ca_path: str,
         on_ring: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
         self.account = account
         self._certificate_path = certificate_path
         self._private_key_path = private_key_path
+        self._ca_path = ca_path
         self._on_ring = on_ring
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -144,11 +149,15 @@ class SipClient:
         self._pending: dict[tuple[str, str], asyncio.Future[SipMessage]] = {}
         self._background_tasks: set[asyncio.Task] = set()
         self._send_lock = asyncio.Lock()
+        self._last_transaction: dict[str, Any] | None = None
         self.registered = False
 
     async def connect(self) -> None:
         context = await asyncio.to_thread(
-            _create_ssl_context, self._certificate_path, self._private_key_path
+            _create_ssl_context,
+            self._certificate_path,
+            self._private_key_path,
+            self._ca_path,
         )
         self._reader, self._writer = await asyncio.open_connection(
             SIP_SERVER, SIP_PORT, ssl=context, server_hostname=SIP_SERVER
@@ -218,10 +227,29 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"Door release failed with SIP status {response.status_code}")
 
-    async def _authenticated_request(self, method: str, uri: str, body: bytes, register: bool = False) -> SipMessage:
+    async def _authenticated_request(
+        self,
+        method: str,
+        uri: str,
+        body: bytes,
+        register: bool = False,
+        *,
+        content_type: str = "text/plain",
+        extra_headers: tuple[str, ...] = (),
+    ) -> SipMessage:
         async with self._send_lock:
-            first = await self._request(method, uri, body, register=register)
+            transaction: dict[str, Any] = {}
+            first = await self._request(
+                method,
+                uri,
+                body,
+                register=register,
+                transaction=transaction,
+                content_type=content_type,
+                extra_headers=extra_headers,
+            )
             if first.status_code not in (401, 407):
+                self._last_transaction = transaction
                 return first
             header_name = "www-authenticate" if first.status_code == 401 else "proxy-authenticate"
             challenge_value = first.headers.get(header_name)
@@ -229,13 +257,18 @@ class SipClient:
                 raise SipError("SIP authentication challenge was incomplete")
             challenge = parse_digest_challenge(challenge_value)
             authorization = digest_authorization(account=self.account, method=method, uri=uri, challenge=challenge)
-            return await self._request(
+            response = await self._request(
                 method,
                 uri,
                 body,
                 register=register,
+                transaction=transaction,
+                content_type=content_type,
+                extra_headers=extra_headers,
                 authorization=("Authorization" if first.status_code == 401 else "Proxy-Authorization", authorization),
             )
+            self._last_transaction = transaction
+            return response
 
     async def _request(
         self,
@@ -244,14 +277,23 @@ class SipClient:
         body: bytes,
         *,
         register: bool,
+        transaction: dict[str, Any] | None = None,
+        content_type: str = "text/plain",
+        extra_headers: tuple[str, ...] = (),
         authorization: tuple[str, str] | None = None,
     ) -> SipMessage:
-        call_id = secrets.token_hex(12)
-        cseq = f"{secrets.randbelow(9999) + 1} {method}"
+        transaction = transaction if transaction is not None else {}
+        call_id = transaction.setdefault("call_id", secrets.token_hex(12))
+        sequence = int(transaction.setdefault("sequence", secrets.randbelow(9999) + 1))
+        if authorization:
+            sequence += 1
+            transaction["sequence"] = sequence
+        cseq = f"{sequence} {method}"
         branch = f"z9hG4bK.{secrets.token_hex(8)}"
-        tag = secrets.token_hex(8)
+        tag = transaction.setdefault("tag", secrets.token_hex(8))
         local = "127.0.0.1:5060"
         from_uri = f"<sip:{self.account.username}@{self.account.domain}>;tag={tag}"
+        transaction["from"] = from_uri
         to_uri = f"<sip:{self.account.username}@{self.account.domain}>" if register else f"<{uri}>"
         headers = [
             f"Via: SIP/2.0/TLS {local};branch={branch};rport",
@@ -271,7 +313,14 @@ class SipClient:
                 ]
             )
         else:
-            headers.extend([f"Route: <sip:{SIP_SERVER};transport=tls;lr>", "Content-Type: text/plain"])
+            headers.extend(
+                [
+                    f"Contact: <sip:{self.account.username}@{self.account.domain};transport=tls>",
+                    f"Route: <sip:{SIP_SERVER};transport=tls;lr>",
+                    f"Content-Type: {content_type}",
+                ]
+            )
+        headers.extend(extra_headers)
         if authorization:
             headers.append(f"{authorization[0]}: {authorization[1]}")
         headers.append(f"Content-Length: {len(body)}")
@@ -304,10 +353,15 @@ class SipClient:
 
     async def _handle_request(self, message: SipMessage) -> None:
         if message.method == "INVITE":
+            # The official Classe 100X app declines calls whose remote SIP URI
+            # does not contain c100x@<selected-gateway-domain>.
+            expected_gateway = f"c100x@{self.account.domain}".casefold()
+            if expected_gateway not in message.headers.get("from", "").casefold():
+                await self._respond(message, 486, "Busy Here")
+                return
             await self._on_ring(
                 {
                     "call_id": message.headers.get("call-id", ""),
-                    "from": message.headers.get("from", ""),
                 }
             )
             await self._respond(message, 180, "Ringing")
