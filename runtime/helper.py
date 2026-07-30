@@ -411,12 +411,14 @@ class Runtime:
             os.write(self.microphone_fd, frame)
 
     def _end_call(self, reason: str) -> None:
+        had_call = self.call is not None
         if self.core is not None:
             self.core.mic_enabled = False
         if self.call is not None:
             self.call.terminate()
-        self._clear_call()
-        self.emit("call_state", state="idle", reason=reason)
+        if had_call:
+            self._clear_call()
+            self.emit("call_state", state="idle", reason=reason)
 
     def _clear_call(self) -> None:
         self.call = None

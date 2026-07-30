@@ -24,4 +24,9 @@ jobs:
       - name: Build runtime from pinned inputs
         run: runtime/build-runtime.sh
       - name: Run credential-free IPC smoke test
-        run: python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz "$(cut -d ' ' -f 1 bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256)"
+        run: |
+          if ! output=$(python3 runtime/smoke-test.py bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz "$(cut -d ' ' -f 1 bticino-c100x-linphone-0.1.0-linux-amd64.tar.gz.sha256)" 2>&1); then
+            echo "::error title=Linphone runtime smoke test::$output"
+            exit 1
+          fi
+          echo "$output"
