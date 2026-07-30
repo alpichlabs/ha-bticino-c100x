@@ -274,7 +274,13 @@ class C100XManager:
         event_type = event.get("event")
         if event_type == "error":
             self.last_error = str(event.get("code") or "runtime_error")
-            _LOGGER.error("BTicino monitoring failed: %s", self.last_error)
+            detail = event.get("detail")
+            if detail:
+                _LOGGER.error(
+                    "BTicino monitoring failed: %s (%s)", self.last_error, detail
+                )
+            else:
+                _LOGGER.error("BTicino monitoring failed: %s", self.last_error)
         if self.media_session:
             self.media_session.handle_event(event)
         self._notify()

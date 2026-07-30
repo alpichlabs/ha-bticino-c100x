@@ -213,6 +213,7 @@ class MediaRuntime:
         self._rtcp_transport: asyncio.DatagramTransport | None = None
         self._monitor: asyncio.Task[None] | None = None
         self._stderr: asyncio.Task[None] | None = None
+        self._ffmpeg_errors: list[str] = []
         self._first_video = asyncio.Event()
         self._last_media = 0.0
         self._ending = False
@@ -293,16 +294,17 @@ class MediaRuntime:
                 "-f",
                 "rtp",
                 "-progress",
-                "pipe:2",
+                "pipe:1",
                 "-y",
                 f"rtp://127.0.0.1:{relay_port}?rtcpport={relay_port + 1}&pkt_size=1200",
             ]
             self.process = await asyncio.create_subprocess_exec(
                 *command,
-                stdout=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            self._stderr = asyncio.create_task(self._read_progress())
+            self._ffmpeg_errors = []
+            self._stderr = asyncio.create_task(self._read_ffmpeg_output())
             self._monitor = asyncio.create_task(self._watchdog())
             await self.event_callback(
                 {
@@ -360,12 +362,23 @@ class MediaRuntime:
         self._media_received()
         self._first_video.set()
 
-    async def _read_progress(self) -> None:
-        assert self.process and self.process.stderr
-        while line := await self.process.stderr.readline():
-            clean = line.decode(errors="replace").strip()
-            if clean.startswith(("out_time_us=", "out_time_ms=")):
-                self._video_received()
+    async def _read_ffmpeg_output(self) -> None:
+        """Track progress and retain bounded, sanitized FFmpeg diagnostics."""
+        assert self.process and self.process.stdout and self.process.stderr
+
+        async def _progress() -> None:
+            while line := await self.process.stdout.readline():
+                clean = line.decode(errors="replace").strip()
+                if clean.startswith(("out_time_us=", "out_time_ms=")):
+                    self._video_received()
+
+        async def _errors() -> None:
+            while line := await self.process.stderr.readline():
+                clean = _sanitize_ffmpeg_error(line.decode(errors="replace").strip())
+                if clean:
+                    self._ffmpeg_errors = (self._ffmpeg_errors + [clean])[-4:]
+
+        await asyncio.gather(_progress(), _errors())
 
     async def _watchdog(self) -> None:
         try:
@@ -384,7 +397,11 @@ class MediaRuntime:
             raise
         except Exception as err:
             await self.event_callback(
-                {"event": "error", "code": _safe_error_code(err)}
+                {
+                    "event": "error",
+                    "code": _safe_error_code(err),
+                    "detail": " | ".join(self._ffmpeg_errors) or None,
+                }
             )
             await self._teardown(send_bye=True, from_monitor=True)
 
@@ -443,6 +460,16 @@ def _safe_error_code(error: Exception) -> str:
         TimeoutError: "setup_timeout",
         MediaRuntimeError: "media_error",
     }.get(type(error), type(error).__name__.casefold())
+
+
+def _sanitize_ffmpeg_error(value: str) -> str:
+    """Keep useful decoder errors without exposing local storage paths."""
+    if not value:
+        return ""
+    value = value.replace("receive-srtp.sdp", "<receive-sdp>")
+    if len(value) > 300:
+        value = value[:297] + "..."
+    return value
 
 
 def _outbound_address() -> str:
