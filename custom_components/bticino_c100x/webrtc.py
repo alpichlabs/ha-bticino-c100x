@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,8 @@ from aiortc import (
 )
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _SnapshotTrack(MediaStreamTrack):
@@ -79,12 +83,24 @@ class WebRTCBridge:
 
             @peer.on("connectionstatechange")
             async def connection_state_changed() -> None:
+                _LOGGER.warning(
+                    "BTicino WebRTC connection state: %s", peer.connectionState
+                )
                 if peer.connectionState in {"failed", "closed", "disconnected"}:
                     await self.close(session_id)
+
+            @peer.on("iceconnectionstatechange")
+            async def ice_connection_state_changed() -> None:
+                _LOGGER.warning(
+                    "BTicino WebRTC ICE state: %s", peer.iceConnectionState
+                )
 
             try:
                 await peer.setRemoteDescription(
                     RTCSessionDescription(sdp=offer_sdp, type="offer")
+                )
+                _LOGGER.warning(
+                    "BTicino WebRTC browser offer: %s", _candidate_summary(offer_sdp)
                 )
                 assert self._player
                 if self._video_source:
@@ -96,6 +112,10 @@ class WebRTCBridge:
                 answer = await peer.createAnswer()
                 await peer.setLocalDescription(answer)
                 assert peer.localDescription
+                _LOGGER.warning(
+                    "BTicino WebRTC server answer: %s",
+                    _candidate_summary(peer.localDescription.sdp),
+                )
                 return peer.localDescription.sdp
             except Exception:
                 self._peers.pop(session_id, None)
@@ -159,3 +179,10 @@ class WebRTCBridge:
                 return
             await asyncio.sleep(0.1)
         raise RuntimeError("Media channel did not become ready")
+
+
+def _candidate_summary(sdp: str) -> str:
+    """Describe ICE candidates without logging addresses or credentials."""
+    types = re.findall(r"^a=candidate:.*?\styp\s+(\w+)", sdp, re.MULTILINE)
+    media = re.findall(r"^m=(\w+)", sdp, re.MULTILINE)
+    return f"media={','.join(media) or 'none'} candidates={','.join(types) or 'none'}"
