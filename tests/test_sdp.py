@@ -64,6 +64,7 @@ def test_answer_is_validated_and_receive_sdp_uses_peer_keys() -> None:
     session = parse_answer(_answer(audio_key, video_key), offer)
     receive = build_receive_sdp(session, include_audio=False)
 
+    assert "c=IN IP4 0.0.0.0" in receive
     assert session.audio and session.audio.connection == "198.51.100.20"
     assert session.audio.codec({"pcma"}).payload_type == 8
     assert session.video and session.video.codec({"h264"}).payload_type == 96

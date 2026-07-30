@@ -248,9 +248,9 @@ def build_receive_sdp(session: NegotiatedSession, *, include_audio: bool = True)
     """Describe the local receive ports using the peer's outbound SRTP keys."""
     lines = [
         "v=0",
-        f"o=- 0 0 IN IP4 {session.offer.address}",
+        "o=- 0 0 IN IP4 0.0.0.0",
         "s=BTicino Classe 100X receive",
-        f"c=IN IP4 {session.offer.address}",
+        "c=IN IP4 0.0.0.0",
         "t=0 0",
     ]
     for media, local_port in (
