@@ -14,30 +14,21 @@ The primary artifact was Android application 1.8.4 (package `com.legrandgroup.c1
 
 The base APK and every inspected split report package `com.legrandgroup.c100x`, version code 108, and the same signing certificate. The arm64 split contains one native library, `liblinphone.so`. This identity chain is important: native conclusions below come from the Classe 100X app bundle, not from a Classe 300X project or a generic Linphone binary.
 
-The app was inspected statically. No certificate, token, password, personal identifier, or live traffic is published here. Decompiled names can be incomplete because the release is obfuscated.
+The app was inspected statically. No certificate, token, password, personal identifier, live-account result, or captured traffic is used as protocol evidence in this document. Decompiled names can be incomplete because the release is obfuscated.
 
-Evidence labels used below:
-
-- **Confirmed**: directly represented by application bytecode or data models.
-- **Observed**: seen against the test installation, without publishing its identifiers.
-- **Inferred**: strongly implied by code but not exercised end to end.
-- **Unknown**: the app does not provide enough evidence to state the behavior safely.
+Every behavioral statement below is directly represented by the signed application's bytecode, packaged resources, data models, or bundled native library. Inferences, live observations, implementation proposals, and behavior found only in other BTicino product generations are excluded.
 
 ### Applicability rule
 
-A behavior is treated as Classe 100X evidence only when at least one of these conditions holds:
-
-1. it is reachable from package `com.legrandgroup.c100x` in the vendor-signed 1.8.4 app;
-2. it is returned by the live account/topology used by that app and agrees with its model mapping; or
-3. it is implemented by the native Linphone split shipped with that same signed app.
+A behavior is treated as Classe 100X evidence only when it is reachable from package `com.legrandgroup.c100x` in the vendor-signed 1.8.4 app or implemented by the native Linphone split shipped with that same signed app.
 
 Names found only in Classe 300X projects, Home + Security/Netatmo integrations, or generic Linphone documentation are comparison material, not proof of Classe 100X behavior. `netatmo_cam` is an explicit topology type handled by the Classe 100X app for an auxiliary camera; its name does not move the intercom itself onto the newer Home + Security API generation.
 
 ### Firmware 1.5.8 compatibility
 
-The Classe 100X app performs an explicit firmware check during full alignment. Its recovered predicate splits the gateway firmware string into three integers and requires major `>= 1`, minor `>= 5`, and patch `>= 8`. Firmware `1.5.8` therefore passes the exact app-side gate (**Confirmed**). The app also labels the locally discovered gateway model `bs-classe100x` and requires commissioning product code `99`.
+The Classe 100X app performs an explicit firmware check during full alignment. Its recovered predicate splits the gateway firmware string into three integers and requires major `>= 1`, minor `>= 5`, and patch `>= 8`. Firmware `1.5.8` therefore passes the exact app-side gate. The app also labels the locally discovered gateway model `bs-classe100x` and requires commissioning product code `99`.
 
-This establishes scope for the installation under test: the cloud/SIP procedures below are reached by the current vendor-signed Classe 100X app for firmware 1.5.8. No firmware replacement, shell access to the intercom, or C300X controller installation is part of this protocol.
+No firmware replacement, shell access to the intercom, or C300X controller procedure appears in these application paths.
 
 ## Architecture
 
@@ -48,17 +39,17 @@ The app does not expose a single REST “door entry API.” It combines four sys
 3. A mutually authenticated SIP-over-TLS session handles registration, calls, early video, audio, and JSON-RPC commands sent as SIP chat messages.
 4. Firebase Cloud Messaging wakes or refreshes SIP registration when an incoming call is pending.
 
-The gateway module ID, topology actuator module ID, SIP account, and phone/app client ID are different identifiers. They must not be substituted for one another.
+The gateway module ID, topology actuator module ID, SIP account, and phone/app client ID are represented by separate fields and models.
 
 ### Why the Classe 100X app contains Netatmo camera code
 
 `netatmo_cam` is an optional camera type inside the Classe 100X topology. The app sends `netatmo.getStatus`, `netatmo.getCameras`, `netatmo.setStatus`, `netatmo.setLogin`, and `netatmo.setPresenceHome` JSON-RPC bodies through Device Management endpoints under `modules/<module-id>/commands/{getCameras,getStatus,setStatus,setLogin,setPresence}`. Returned cameras are then exposed as camera-only SIP viewing targets using `TVCC=1`.
 
-That is an accessory bridge implemented by the Classe 100X gateway/app. It is not the strike path, does not change the gateway type from `bs-classe100x`, and is not evidence that this integration should use the Home + Security/Netatmo firmware-2.x authentication model. No Netatmo procedure is needed for the installation under test unless such an auxiliary camera is actually configured.
+This code path is separate from the Classe 100X strike path. The application continues to identify the gateway as `bs-classe100x`.
 
 ## Production service roots
 
-These production roots are **Confirmed**:
+These production roots are embedded in the application:
 
 | Purpose | Root |
 |---|---|
@@ -73,11 +64,11 @@ These production roots are **Confirmed**:
 | Remote SIP proxy | `vdesip.bs.iotleg.com` |
 | Per-gateway SIP domain | `<gateway-module-id>.bs.iotleg.com` |
 
-The APK also contains QA/pre-production endpoints. They are deliberately omitted: they are irrelevant to a production integration and are not a supported public environment.
+The APK also contains QA/pre-production endpoints; this reference lists only the production roots selected by its production configuration.
 
 ## OAuth authentication
 
-The production app uses Azure AD B2C authorization-code authentication (**Confirmed**):
+The production app uses Azure AD B2C authorization-code authentication:
 
 - tenant: `EliotClouduamprd.onmicrosoft.com`
 - sign-in policy: `B2C_1_DoorEliot-C100X-SignUporSignIn`
@@ -93,7 +84,7 @@ GET  https://eliotclouduamprd.b2clogin.com/EliotClouduamprd.onmicrosoft.com/oaut
 POST https://eliotclouduamprd.b2clogin.com/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/token?p=<policy>
 ```
 
-The application ID and API subscription key are identifiers embedded in the distributable app, not user secrets. A separate application-level client credential is also embedded by the vendor; this document does not reproduce it because third-party clients do not need it for the normal user authorization-code/refresh-token path.
+The application ID, API subscription key, and a separate application-level client credential are embedded in the distributable app. Their values are not reproduced here.
 
 Access tokens are passed as `Authorization: Bearer <access-token>`. Some certificate and user operations additionally pass a token in `UserToken`. OAuth refresh tokens are used to renew access without repeating the interactive sign-in.
 
@@ -101,7 +92,7 @@ The recovered authorization library builds a conventional `response_type=code` r
 
 ## Common HTTPS headers
 
-Most JSON API calls use (**Confirmed**):
+Most JSON API calls use:
 
 ```http
 Authorization: Bearer <user-access-token>
@@ -109,17 +100,19 @@ Ocp-Apim-Subscription-Key: <Door Entry application subscription key>
 Content-Type: application/json
 ```
 
-Certificate and selected user calls add:
+Certificate calls use the exact header split documented in [Client certificates](#client-certificates). Selected user-service calls also use `UserToken` according to their recovered call sites.
+
+The general additional-header form is:
 
 ```http
-UserToken: <user-access-token or application-token, according to the call path>
+UserToken: <token selected by the recovered call site>
 ```
 
-The HTTP API manager contains a sanitizer for `sipPassword`, `access_token`, `cert`, client secrets, API keys, and passwords. Other recovered authentication code nevertheless includes debug statements that interpolate access and refresh tokens directly. That is a vendor implementation weakness, not behavior to reproduce: this integration must never emit either token at any log level.
+The HTTP API manager contains a sanitizer for `sipPassword`, `access_token`, `cert`, client secrets, API keys, and passwords. Other recovered authentication code nevertheless includes debug statements that interpolate access and refresh tokens directly.
 
 ## HTTPS endpoint catalogue
 
-Volley numeric methods in the APK map to GET=0, POST=1, PUT=2, DELETE=3, and PATCH=7. The following endpoint construction and response classes are **Confirmed**. Bodies marked “model” are serialized model objects; fields not exercised by this integration may be optional server-side.
+Volley numeric methods in the APK map to GET=0, POST=1, PUT=2, DELETE=3, and PATCH=7. The following endpoint construction and response classes occur in the application. Bodies marked “model” are serialized model objects.
 
 ### Topology, plants, and users
 
@@ -156,7 +149,7 @@ The official lock query applies the following exact selection rule before it cre
 2. `PrivateAddress.visible` must equal `1` or `2`;
 3. all matching locks are retained and ordered by numeric `PrivateAddress.buttonId`.
 
-Consequently, a topology may legitimately contain several current cloud `Lock` modules while the app displays only one. Hidden records (`visible=0`) are not user-selectable strikes even though they are still present in the service catalogue. Conversely, an installation with two locks marked visible must expose both; the integration must not collapse them to one.
+The application therefore creates one release control for every matching visible lock. Records with another visibility value are not used to create release controls.
 
 ### SIP accounts
 
@@ -176,7 +169,7 @@ Consequently, a topology may legitimately contain several current cloud `Lock` m
 | GET | `certificate/api/v1.0/ca/information/CACerts` | —; extra `UserToken` | `{ "chain": ... }` |
 | POST | `certificate/api/v1.0/ca/information/clientCerts` | certificate request | `{ "cert": ... }` |
 
-Certificate creation in the official app is **Confirmed** as follows:
+Certificate creation in the official app is as follows:
 
 1. Generate an EC key pair on curve `prime256v1`/P-256 locally.
 2. Keep the private key local; only a PKCS#10 CSR is uploaded.
@@ -189,7 +182,7 @@ Certificate creation in the official app is **Confirmed** as follows:
 
 The certificate calls first obtain a separate application token through the app's embedded client-credentials flow. The official request helper `u(userToken, bearerToken, key)` places the **application token** in `Authorization: Bearer ...` and the **user access token** in `UserToken`. This ordering is confirmed by both `U2.h1` call sites and `R2.a.u`; treating both headers as the same token, or reversing them, is not an exact reproduction of the official app.
 
-The official app checks certificate validity 30 days into the future (`now + 2,592,000,000 ms`). If that check fails, it deletes the stored key/certificate material so the alignment/provisioning flow can create a new set. Consequently, a long-running integration must renew before this 30-day window, not merely on the `notAfter` date.
+The official app checks certificate validity 30 days into the future (`now + 2,592,000,000 ms`). If that check fails, it deletes the stored key/certificate material so the alignment/provisioning flow can create a new set.
 
 ### Push notifications
 
@@ -203,7 +196,7 @@ The subscription model contains `deviceUniqueId`, `handle` (FCM token), `languag
 
 Recognized FCM data keys are `message`, `loc-args`, `id_gateway`, and `id_message`. The app rejects a notification for another gateway. If `loc-args` contains `c100x@<gatewayId>.bs.iotleg.com`, or if `id_message` is absent, it starts the SIP service and refreshes registration. Other confirmed message IDs are `IP_CHANGE`, `TOPOLOGY_CHANGE`, `DELETE_GW`, `Pending user consent for download`, and `Pending user consent for installation`.
 
-FCM is therefore a wake-up optimization, not the source of the SIP call itself. A permanently running Home Assistant process can maintain SIP registration directly and does not need to impersonate an Android FCM installation.
+FCM starts or refreshes the SIP service; the incoming call itself is handled by Linphone.
 
 ### Device management and firmware
 
@@ -223,11 +216,11 @@ The app also calls `termsandconditions/api/V2.0` for all-consent and consent-doc
 
 ## Local commissioning protocol
 
-The APK contains a second JSON-RPC implementation used during local discovery and commissioning. It is independent of SIP commands and connects by TCP to the gateway's LAN IP on port `50003` (**Confirmed**).
+The APK contains a second JSON-RPC implementation used during local discovery and commissioning. It is independent of SIP commands and connects by TCP to the gateway's LAN IP on port `50003`.
 
-The socket is upgraded to TLS-PSK. The PSK identity is the QR-code `macaddr` and the hexadecimal PSK is the QR-code `pskkey`; these are installation secrets and must never be published. JSON requests are written as newline-terminated UTF-8 strings. The client reads one response and closes the connection.
+The socket is upgraded to TLS-PSK. The PSK identity is the QR-code `macaddr` and the hexadecimal PSK is the QR-code `pskkey`. JSON requests are written as newline-terminated UTF-8 strings. The client reads one response and closes the connection.
 
-Confirmed local methods are:
+Local methods present in this path are:
 
 | Method | Purpose | Important fields |
 |---|---|---|
@@ -239,11 +232,11 @@ Confirmed local methods are:
 
 All use JSON-RPC `2.0`, a random non-negative integer encoded as a string for request `id`, and a one-element `params` array. Parameter models default to version `v1.0`.
 
-This local protocol explains why the official app may know the gateway without asking the user for a LAN address: onboarding obtains the address from the QR/access-point and network discovery flow. It does **not** explain strike selection. Runtime remote strike commands still target the per-gateway SIP URI and carry the cloud lock module ID in `receiver.plant.coal.id`.
+This local commissioning protocol is distinct from the runtime remote strike path, which targets the per-gateway SIP URI and carries the cloud lock module ID in `receiver.plant.coal.id`.
 
 ## SIP transport and registration
 
-Remote operation uses Linphone over TLS (**Confirmed**):
+Remote operation uses Linphone over TLS:
 
 - proxy/registrar: `vdesip.bs.iotleg.com`
 - transport: TLS
@@ -279,19 +272,15 @@ The signed arm64 split provides additional native-build evidence. It contains on
 - liblinphone/oRTP/mediastreamer component version `5.4.0`;
 - the JNI entry points used by the recovered Java binding, including `Java_org_linphone_core_ChatRoomImpl_createMessage` and `linphone_chat_room_create_message`.
 
-The apparently different `3.0.3` and `5.4.0` values are both emitted by this same vendor-signed binary. They likely distinguish the vendor SDK product build from its upstream Linphone component baseline; neither should be silently replaced with the version of a system Linphone package.
+The apparently different `3.0.3` and `5.4.0` values are both emitted by this same vendor-signed binary. Their relationship is not defined by the application and is not interpreted further here.
 
-For portal accounts the app loads the CA chain returned by `CACerts` into Linphone as root CA data, and separately loads the issued client certificate and local EC private key. Disabling server verification or discarding that CA chain is therefore not an exact or security-equivalent implementation of the official client.
+For portal accounts the app loads the CA chain returned by `CACerts` into Linphone as root CA data, and separately loads the issued client certificate and local EC private key. The app does not hard-code a SIP service port; its factory configuration enables DNS SRV.
 
-The app does not hard-code a SIP service port; its factory configuration enables DNS SRV. A read-only DNS check on 2026-07-29 returned three `_sips._tcp.vdesip.bs.iotleg.com` targets, all on port `5228`, with priorities 10, 20, and 80. `vdesip.bs.iotleg.com` also resolved through a `vde-sipN` node. Thus 5228 is currently verified but should be discovered through SRV to preserve proxy failover and future server changes.
-
-A read-only TLS handshake on the same date returned a server certificate with subject `C=FR, O=LEGRAND, OU=VDE, CN=vdesip.bs.iotleg.com`, SAN `*.bs.iotleg.com`, issuer `Legrand Non-Public - PROD`, and validity 2026-06-26 through 2027-06-26. These values are operational observations, not stable constants; an implementation should validate the returned chain and allowed identity rather than pinning that leaf certificate or its dates.
-
-For local Wi-Fi it can prefer a discovered/configured local SIP server, then falls back to remote. The default development local identity values visible in preferences (`user1`, `12345`, `127.0.0.1`, `sip.c100x.org`) must not be treated as production credentials.
+For local Wi-Fi it can prefer a discovered/configured local SIP server, then falls back to remote. The application also contains default development preference values: `user1`, `12345`, `127.0.0.1`, and `sip.c100x.org`.
 
 ## Ringing, video, and audio
 
-An incoming ring is a SIP `INVITE` (**Confirmed**). The app verifies that its remote URI contains `c100x@<gatewayId>.bs.iotleg.com`; calls from another origin are declined as busy. It broadcasts call state internally and opens its call UI.
+An incoming ring is a SIP `INVITE`. The app verifies that its remote URI contains `c100x@<gatewayId>.bs.iotleg.com`; calls from another origin are declined as busy. It broadcasts call state internally and opens its call UI.
 
 For incoming calls it accepts early media before the user answers. When the remote offer enables video, the intended media configuration is receive-only video with audio initially inactive. On answer, it accepts with receive-only video; normal external-unit calls use send/receive audio. The application:
 
@@ -304,9 +293,9 @@ For incoming calls it accepts early media before the user answers. When the remo
 
 The app's “view entrance” operation starts an outgoing SIP call to the short target `c100x`. Linphone resolves it in the active identity domain, yielding `sip:c100x@<gatewayId>.bs.iotleg.com`. The SDP carries `DEVADDR=<selected EU module id>`. Netatmo/TVCC entries add `TVCC=1`. The remote answer can return `DEVADDR`, which the UI records as the active entrance/camera. This is separate from the strike receiver but uses the same cloud module-ID addressing convention.
 
-Codec ordering, payload types, NAT traversal, SRTP keying, SIP dialog state, and RTP processing are deliberately delegated to the bundled Linphone stack. They are not application-defined packet templates. A compatible implementation must use Linphone 5.4 behavior for negotiation and media instead of generating a guessed SDP offer or implementing SRTP/RTP independently.
+Codec ordering, payload types, NAT traversal, SRTP keying, SIP dialog state, and RTP processing are delegated to the bundled Linphone stack. The Java application does not create a manual SIP `INVITE`, choose an H.264 payload type, calculate SRTP keys, or parse RTP packets itself.
 
-The app's exact outgoing Classe 100X monitoring sequence is **Confirmed**:
+The app's outgoing Classe 100X monitoring sequence is:
 
 1. require Linphone registration state `Ok` and an active network;
 2. interpret the short destination `c100x` through the default proxy identity;
@@ -319,7 +308,9 @@ The app's exact outgoing Classe 100X monitoring sequence is **Confirmed**:
 9. render decoded video through Linphone's native video-window output;
 10. terminate calls with no audio or video download bandwidth for ten seconds.
 
-The app does not create a manual SIP `INVITE`, choose an H.264 payload type, calculate SRTP keys, or parse RTP packets itself.
+For a monitoring call started from `VctHomepageFragment`, the call-state handler invokes `setAudioMuted(true)` and selects speaker output. `setAudioMuted(true)` delegates to `Core.setMicEnabled(false)`. The normal external-unit call nevertheless retains `AudioDirection.SendRecv`; received audio continues through Linphone while microphone capture is disabled. The UI checkbox reverses this by calling `Core.setMicEnabled(true)` on the same call.
+
+The video window is an `AndroidVideoWindowImpl` backed by `FixedAspectGL2JNIView` (or `FixedAspectSurfaceView` for one legacy device model). The app initially makes the rendering view transparent, calls `requestNotifyNextVideoFrameDecoded()`, and reveals it when `onNextVideoFrameDecoded()` fires.
 
 ## Door release and other JSON-RPC commands
 
@@ -351,69 +342,20 @@ The body is compact JSON-RPC 2.0. For a strike module:
 }
 ```
 
-The application passes this JSON string directly to Linphone `ChatRoom.createMessage(String)` and calls `send()`. It does not call `ChatMessage.setContentType`, add custom SIP headers, or wrap the body in an app-defined envelope. The corresponding native entry point is the plain-message constructor and the bundled native library contains the `text/plain` media type. Consequently `Content-Type: text/plain` is the best-supported reconstruction. It remains **Inferred**, rather than packet-level **Observed**, until a redacted official-app SIP trace confirms the serialized request.
+The application passes this JSON string directly to Linphone `ChatRoom.createMessage(String)` and calls `send()`. It does not call `ChatMessage.setContentType`, add custom SIP headers, or wrap the body in an app-defined envelope. Content framing beyond that Java call is delegated to the bundled Linphone library and is not specified here.
 
-The command actuates the electric strike for its configured pulse; it does not represent persistent deadbolt state. It may be sent without a preceding ring/call, matching the official app’s standalone release button.
+The home-page release control can send this command without a preceding incoming call. The application labels the operation as a door release and sends `status: "open"`; this path contains no persistent lock-state model.
 
-There are two confirmed UI paths:
+There are two UI paths:
 
-- On the home page, the app creates one release slider for every aligned `Lock` device and passes that device's cloud module ID and CID `10060` to the command method. This is the standalone release path relevant to Home Assistant.
+- On the home page, the app creates one release slider for every aligned visible `Lock` device and passes that device's cloud module ID and CID `10060` to the command method.
 - In the active-call screen, the release slider has no concrete device object. It invokes the session/default CID `10060` with a null receiver ID, leaving the active intercom session to select its associated strike.
 
-The Home Assistant button is not in a SIP call, so it must reproduce the first path with the selected lock module ID; it must not send the in-call null-receiver form.
-
-The staircase-light request uses method `light.setStatus`, status `on`, and—despite the name—its serializer retains the same `receiver.plant.coal.id` branch while excluding `plant.module`. `gateway.sendLogs` does the opposite: it excludes `coal`, retains the `module` branch, and has no explicit module argument at its call site. Staircase light is intentionally outside this integration’s requested scope.
+The staircase-light request uses method `light.setStatus`, status `on`, and its serializer retains the same `receiver.plant.coal.id` branch while excluding `plant.module`. `gateway.sendLogs` excludes `coal`, retains the `module` branch, and has no explicit module argument at its call site.
 
 The app requires SIP registration state `Ok`, obtains a chat room for the per-gateway destination, verifies that the chat room’s local identity equals the selected SIP user, recreates it on mismatch, then sends the message. `ChatRoom.createMessage(String)` delegates content framing to Linphone; the Java code does not explicitly assign a content type. A JSON-RPC response model exists with `jsonrpc`, numeric `id`, boolean `result`, or `error {code,message}`, but the command callback shown in the app is driven by Linphone message state.
 
-Important limitation: SIP `200 OK` or Linphone `Delivered` proves message acceptance/delivery at the SIP layer, not mechanical strike movement. The official callback waits up to 15 seconds, counts `NotDelivered` as failure, and returns success only when every tracked message reaches a terminal state with zero failures. It still has no confirmed physical feedback. A correct integration must report transport failure precisely and avoid claiming verified actuation without a separate device acknowledgement.
-
-## Operational sequence
-
-The minimum remote flow inferred from the app is:
-
-1. Complete B2C sign-in and retain a refresh token securely.
-2. Fetch the user’s plants and current topology.
-3. Select the Classe 100X gateway and retain every `Lock` whose `PrivateAddress.visible` is `1` or `2`, ordered by `buttonId`.
-4. Fetch or create a SIP account tied to a stable client ID.
-5. Generate a local P-256 key and provision a SIP client certificate; renew it before the 30-day pre-expiry check fails.
-6. Connect to the production SIP proxy over TLS and register the account.
-7. Treat an authenticated gateway `INVITE` as a ring event; optionally negotiate early media/call media.
-8. Send `lock.setStatus` by SIP `MESSAGE` to the per-gateway URI for standalone or in-call strike release.
-9. Reconcile topology periodically so disconnected/stale lock modules disappear without collapsing legitimate multi-lock installations.
-
-## Safety and compatibility notes
-
-- Never log OAuth tokens, SIP passwords, private keys, certificates, full topology payloads, or account identifiers.
-- Never upload the generated private key; only upload its CSR.
-- Do not expose a release entity as a stateful “unlocked” deadbolt. It is a momentary strike action.
-- Do not test release automatically. Require an explicit user action even when a mechanical key lock prevents entry.
-- Do not infer Classe 100X behavior from Classe 300X/300EOS or Home + Security integrations.
-- The protocol is private and may change server-side without notice. HTTP/SIP error handling and reauthentication must be conservative.
-
-## Live read-only verification (2026-07-29)
-
-A direct test against a real Classe 100X account was performed outside Home Assistant. No `lock.setStatus` message was sent, no strike was actuated, and the media offer was receive-only. Identifiers and credentials are intentionally omitted.
-
-- The gateway reported model `bs-classe100x`, firmware `1.5.8`, hardware `02.07.0`, `CONNECTED`, and `on`.
-- The topology contained three current cloud lock records, but the official app rule selected only the one whose `PrivateAddress.visible` was `2`; the other two had `visible=0`. This independently correlates the recovered database/UI selection rule without collapsing installations that genuinely contain several visible locks.
-- The account already had three SIP clients. Attempting to create a fourth returned HTTP 400, so the test reused the existing dedicated integration client without involving the Home Assistant runtime.
-- Certificate provisioning with the recovered official-app headers, `sipuser` template, and `OU=C100X` succeeded. The client certificate SAN matched the SIP URI, its issuer was the Legrand production non-public CA, and its lifetime was approximately one year. The returned CA chain expires in 2036.
-- The repository SIP client completed authenticated TLS/Digest registration successfully with the newly provisioned certificate.
-
-The test also confirms the corrected certificate-header split documented above: `Authorization` carries the application token and `UserToken` carries the user access token.
-
-## What remains unverified
-
-Static analysis gives high confidence in endpoint construction and control flow. The following remain outside the claims made by this reference:
-
-- full request/response schemas and optional fields returned by every cloud endpoint;
-- Linphone-internal serialization details that the application intentionally delegates to its bundled native stack;
-- compatibility of a future packaged Linux Linphone runtime on every Home Assistant architecture;
-- whether the gateway returns an application-level JSON-RPC result after strike execution;
-- certificate lifetime and renewal behavior for every certificate template/account age.
-
-Missing application behavior must be resolved from the vendor application and its exact dependency versions, with personal data and credentials removed, rather than guessed through live actuation or ad-hoc protocol probes.
+The command callback waits up to 15 seconds, counts Linphone `NotDelivered` as failure, and reports success only when every tracked message reaches a terminal state with zero failures. The recovered application path contains no separate sensor reading that confirms physical strike movement.
 
 ## Reproducibility map
 
@@ -436,19 +378,3 @@ The following app-owned symbols were independently cross-checked. Names are thos
 | Local probe | `p076i3.a` | product code 99 validation and MAC discovery |
 | Linphone defaults | APK resources `res/raw/linphonerc_default` and `linphonerc_factory` | transport, verification, RTP, STUN, timeout, and video defaults |
 | Native SIP/media implementation | signed split `config.arm64_v8a.apk`, `lib/arm64-v8a/liblinphone.so` | packaged architecture, build/component versions, JNI/plain-message entry points |
-
-## Differences found in the current Home Assistant prototype
-
-These are audit findings, not claims about the official app:
-
-1. The prototype provisions template `sipuser-DIY` with `OU=DIY`; app 1.8.4 provisions `sipuser` with `OU=C100X`.
-2. The prototype sends the user access token in both certificate headers; the app obtains an application token for `Authorization` and sends the user access token separately as `UserToken`.
-3. The prototype does not fetch/install `CACerts` and disables SIP TLS server verification; the app installs that CA chain and verifies the server against an explicit subject allow-list.
-4. The prototype hand-builds SIP requests. Header generation, routing, dialog/chat-room behavior, and content framing must be compared with Linphone behavior before considering it equivalent.
-5. The prototype reports success on a final SIP 200 response. The app waits for Linphone's message delivery state with a 15-second timeout; neither mechanism proves physical actuation.
-6. The prototype reports a ring on any received `INVITE`. The app rejects an incoming call unless its remote URI identifies `c100x@<selected-gateway>.bs.iotleg.com`.
-7. The prototype responds `180` then `486` and does not negotiate media. The app accepts early media and maintains the call state needed for preview, video, and two-way audio.
-8. The prototype adds PKCE to the B2C flow. PKCE is a desirable protection and the server accepts it, but it is not present in the recovered 1.8.4 reference flow and must be described as an intentional enhancement rather than reverse-engineered behavior.
-9. The prototype advertises `ha-bticino-c100x/0.1`, registers for 600 seconds, and constructs `Via`/`Contact` around `127.0.0.1:5060`. The reference app identifies as `VctLinphoneService/1.8.4`, asks for 5,184,000 seconds, disables local listening ports, and lets Linphone construct transport/contact details for its outbound TLS flow. Registration success shows that the server tolerates some differences, but it does not prove that an independently constructed MESSAGE is routed and tracked identically.
-
-These differences must be resolved from official-app behavior before video/audio or strike control is described as complete.
