@@ -118,7 +118,15 @@ class C100XManager:
             raise SipError("Media runtime is unavailable")
         if camera_id not in self.camera_ids:
             raise SipError("External unit is not visible in the official topology")
-        await self.media_session.start(camera_id)
+        self.last_error = None
+        self._notify()
+        try:
+            await self.media_session.start(camera_id)
+        except Exception as err:
+            self.last_error = _diagnostic_error(err)
+            _LOGGER.error("BTicino monitoring start failed: %s", self.last_error)
+            self._notify()
+            raise
 
     async def async_end_monitoring(self) -> None:
         if self.microphone_uplink:
@@ -266,6 +274,7 @@ class C100XManager:
         event_type = event.get("event")
         if event_type == "error":
             self.last_error = str(event.get("code") or "runtime_error")
+            _LOGGER.error("BTicino monitoring failed: %s", self.last_error)
         if self.media_session:
             self.media_session.handle_event(event)
         self._notify()
@@ -306,3 +315,9 @@ class C100XManager:
     @staticmethod
     def _new_client_id() -> str:
         return str(secrets.randbelow(9) + 1) + "".join(str(secrets.randbelow(10)) for _ in range(21))
+
+
+def _diagnostic_error(error: Exception) -> str:
+    """Return a bounded, credential-free failure description."""
+    detail = " ".join(str(error).split())[:160]
+    return f"{type(error).__name__}: {detail}" if detail else type(error).__name__

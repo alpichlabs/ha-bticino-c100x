@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bticino_c100x.const import CONF_GATEWAY_ID, CONF_HOME_ID, DOMAIN, EVENT_RING
@@ -46,3 +47,21 @@ async def test_release_uses_module_id_over_registered_sip(hass) -> None:
     await manager.async_release("lock-module")
 
     manager._sip.release_door.assert_awaited_once_with("lock-module", "gateway")
+
+
+async def test_monitoring_start_records_sanitized_error(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_GATEWAY_ID: "gateway", CONF_HOME_ID: "home"},
+        unique_id="account",
+    )
+    entry.add_to_hass(hass)
+    manager = C100XManager(hass, entry, AsyncMock(), AsyncMock())
+    manager.camera_ids = ["eu-module"]
+    manager.media_session = AsyncMock()
+    manager.media_session.start.side_effect = RuntimeError("negotiation failed")
+
+    with pytest.raises(RuntimeError, match="negotiation failed"):
+        await manager.async_start_monitoring("eu-module")
+
+    assert manager.last_error == "RuntimeError: negotiation failed"

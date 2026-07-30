@@ -429,6 +429,8 @@ class MediaRuntime:
 
 
 def _safe_error_code(error: Exception) -> str:
+    if isinstance(error, MediaRuntimeError) and "FFmpeg" in str(error):
+        return "ffmpeg_exit"
     return {
         TimeoutError: "setup_timeout",
         MediaRuntimeError: "media_error",

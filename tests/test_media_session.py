@@ -60,3 +60,14 @@ def test_call_error_resets_microphone_and_records_error() -> None:
     assert session.state == SessionState.ERROR
     assert session.microphone_enabled is False
     assert session.last_error == "call_error"
+
+
+def test_media_error_survives_automatic_teardown_event() -> None:
+    session = MediaSession(MagicMock(), MagicMock())
+    session.state = SessionState.CONNECTING
+
+    session.handle_event({"event": "error", "code": "setup_timeout"})
+    session.handle_event({"event": "call_state", "state": "ended"})
+
+    assert session.state == SessionState.ERROR
+    assert session.last_error == "setup_timeout"

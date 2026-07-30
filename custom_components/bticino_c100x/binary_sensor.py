@@ -39,6 +39,14 @@ class C100XSessionSensor(C100XEntity, BinarySensorEntity):
         session = self.manager.media_session
         return bool(session and session.state in {"connecting", "streaming"})
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        session = self.manager.media_session
+        return {
+            "session_state": session.state if session else "unavailable",
+            "last_error": self.manager.last_error,
+        }
+
 
 class C100XMicrophoneSensor(C100XEntity, BinarySensorEntity):
     _attr_name = "Microphone"

@@ -89,9 +89,10 @@ class MediaSession:
             self.microphone_enabled = False
             self.last_error = "call_error"
         elif event_type == "call_state" and event.get("state") in {"idle", "ended", "released"}:
-            self.state = SessionState.IDLE
-            self.device_address = None
-            self.microphone_enabled = False
+            if self.state != SessionState.ERROR:
+                self.state = SessionState.IDLE
+                self.device_address = None
+                self.microphone_enabled = False
         elif event_type == "error":
             self.state = SessionState.ERROR
             self.microphone_enabled = False
