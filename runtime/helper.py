@@ -181,6 +181,20 @@ class Runtime:
                 for name in names
                 if not hasattr(type(listener), name)
             )
+        enum_members = (
+            (linphone.MediaEncryption, "MediaEncryptionSRTP"),
+            (linphone.MediaDirection, "MediaDirectionSendRecv"),
+            (linphone.MediaDirection, "MediaDirectionRecvOnly"),
+            (linphone.RegistrationState, "RegistrationStateOk"),
+            (linphone.CallState, "CallStateStreamsRunning"),
+            (linphone.ChatMessageState, "ChatMessageStateDelivered"),
+            (linphone.Reason, "ReasonBusy"),
+        )
+        missing.extend(
+            f"{enum_type.__name__}.{name}"
+            for enum_type, name in enum_members
+            if not hasattr(enum_type, name)
+        )
         return {"binding": "ok" if not missing else "mismatch", "missing": missing}
 
     def command_register(self, request: dict[str, Any]) -> None:
@@ -199,7 +213,7 @@ class Runtime:
         core.tls_cert_path = request["certificate_path"]
         core.tls_key_path = request["private_key_path"]
         core.verify_server_certificates(True)
-        core.media_encryption = linphone.MediaEncryption.SRTP
+        core.media_encryption = linphone.MediaEncryption.MediaEncryptionSRTP
         core.set_media_encryption_mandatory(True)
         core.video_capture_enabled = False
         core.video_display_enabled = False
@@ -241,9 +255,9 @@ class Runtime:
         params = self.core.create_call_params(None)
         params.audio_enabled = True
         params.video_enabled = True
-        params.audio_direction = linphone.MediaDirection.SendRecv
-        params.video_direction = linphone.MediaDirection.RecvOnly
-        params.media_encryption = linphone.MediaEncryption.SRTP
+        params.audio_direction = linphone.MediaDirection.MediaDirectionSendRecv
+        params.video_direction = linphone.MediaDirection.MediaDirectionRecvOnly
+        params.media_encryption = linphone.MediaEncryption.MediaEncryptionSRTP
         params.mic_enabled = False
         params.add_custom_sdp_attribute("DEVADDR", request["device_address"])
         self.media_path = request.get("media_path")
@@ -333,36 +347,36 @@ class Runtime:
 
     def _registration_changed(self, _core, _proxy, state, _message) -> None:
         names = {
-            linphone.RegistrationState.Ok: "ok",
-            linphone.RegistrationState.Progress: "progress",
-            linphone.RegistrationState.Cleared: "cleared",
-            linphone.RegistrationState.Failed: "failed",
+            linphone.RegistrationState.RegistrationStateOk: "ok",
+            linphone.RegistrationState.RegistrationStateProgress: "progress",
+            linphone.RegistrationState.RegistrationStateCleared: "cleared",
+            linphone.RegistrationState.RegistrationStateFailed: "failed",
         }
         self.emit("registration", state=names.get(state, "none"))
 
     def _call_state_changed(self, _core, call, state, _message) -> None:
-        if state == linphone.CallState.IncomingReceived:
+        if state == linphone.CallState.CallStateIncomingReceived:
             remote = call.remote_address.as_string_uri_only().casefold()
             if not self.domain or f"c100x@{self.domain}".casefold() not in remote:
-                self.core.decline_call(call, linphone.Reason.Busy)
+                self.core.decline_call(call, linphone.Reason.ReasonBusy)
                 return
             self.emit("ring", call_id=call.call_log.call_id or "")
             self.incoming_call = call
             self.incoming_deadline = time.monotonic() + 2
             return
         names = {
-            linphone.CallState.OutgoingInit: "outgoing_init",
-            linphone.CallState.OutgoingProgress: "outgoing_progress",
-            linphone.CallState.OutgoingRinging: "outgoing_ringing",
-            linphone.CallState.Connected: "connected",
-            linphone.CallState.StreamsRunning: "streams_running",
-            linphone.CallState.End: "ended",
-            linphone.CallState.Error: "error",
-            linphone.CallState.Released: "released",
+            linphone.CallState.CallStateOutgoingInit: "outgoing_init",
+            linphone.CallState.CallStateOutgoingProgress: "outgoing_progress",
+            linphone.CallState.CallStateOutgoingRinging: "outgoing_ringing",
+            linphone.CallState.CallStateConnected: "connected",
+            linphone.CallState.CallStateStreamsRunning: "streams_running",
+            linphone.CallState.CallStateEnd: "ended",
+            linphone.CallState.CallStateError: "error",
+            linphone.CallState.CallStateReleased: "released",
         }
         if name := names.get(state):
             self.emit("call_state", state=name)
-        if state == linphone.CallState.StreamsRunning and call == self.call:
+        if state == linphone.CallState.CallStateStreamsRunning and call == self.call:
             self.media_started = True
             self.setup_deadline = 0
             self.media_deadline = time.monotonic() + 10
@@ -377,7 +391,11 @@ class Runtime:
                 video_enabled=bool(params.video_enabled),
                 audio_enabled=bool(params.audio_enabled),
             )
-        terminal_states = (linphone.CallState.End, linphone.CallState.Error, linphone.CallState.Released)
+        terminal_states = (
+            linphone.CallState.CallStateEnd,
+            linphone.CallState.CallStateError,
+            linphone.CallState.CallStateReleased,
+        )
         if state in terminal_states and call == self.call:
             self._clear_call()
 
@@ -391,21 +409,21 @@ class Runtime:
 
     def _message_state_changed(self, message, state) -> None:
         names = {
-            linphone.ChatMessageState.InProgress: "in_progress",
-            linphone.ChatMessageState.Delivered: "delivered",
-            linphone.ChatMessageState.NotDelivered: "not_delivered",
-            linphone.ChatMessageState.FileTransferError: "error",
+            linphone.ChatMessageState.ChatMessageStateInProgress: "in_progress",
+            linphone.ChatMessageState.ChatMessageStateDelivered: "delivered",
+            linphone.ChatMessageState.ChatMessageStateNotDelivered: "not_delivered",
+            linphone.ChatMessageState.ChatMessageStateFileTransferError: "error",
         }
         name = names.get(state)
         if name:
             self.emit("message_delivery", state=name)
-        if state != linphone.ChatMessageState.InProgress:
+        if state != linphone.ChatMessageState.ChatMessageStateInProgress:
             self.message = None
 
     def _watchdogs(self) -> None:
         now = time.monotonic()
         if self.incoming_call is not None and now >= self.incoming_deadline:
-            self.core.decline_call(self.incoming_call, linphone.Reason.Busy)
+            self.core.decline_call(self.incoming_call, linphone.Reason.ReasonBusy)
             self.incoming_call = None
             self.incoming_deadline = 0
         if self.call is not None and self.media_started:
