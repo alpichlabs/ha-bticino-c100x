@@ -4,15 +4,28 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.bticino_c100x.webrtc import WebRTCBridge
+from custom_components.bticino_c100x.webrtc import WebRTCBridge, _candidate_route
 from custom_components.bticino_c100x.webrtc_config import STUN_URLS
 
 
 def test_stun_has_independent_fallback() -> None:
     assert STUN_URLS == (
         "stun:stun.cloudflare.com:3478",
+        "stun:stun.cloudflare.com:53",
         "stun:stun.linphone.org:3478",
     )
+
+
+@pytest.mark.parametrize(
+    ("host", "route"),
+    [
+        ("192.168.1.4", "ipv4-private"),
+        ("2001:4860:4860::8888", "ipv6-public"),
+        ("camera-candidate.local", "mdns"),
+    ],
+)
+def test_candidate_route_is_sanitized(host: str, route: str) -> None:
+    assert _candidate_route(host) == route
 
 
 @pytest.mark.asyncio

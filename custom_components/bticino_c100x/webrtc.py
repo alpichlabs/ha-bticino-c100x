@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
 import time
@@ -161,6 +162,10 @@ class WebRTCBridge:
             match.group(1) if match else "unknown",
         )
         candidate = candidate_from_sdp(raw.removeprefix("candidate:"))
+        _LOGGER.warning(
+            "BTicino WebRTC browser candidate route: %s",
+            _candidate_route(candidate.ip),
+        )
         candidate.sdpMid = getattr(value, "sdp_mid", None)
         candidate.sdpMLineIndex = getattr(value, "sdp_m_line_index", None)
         await peer.addIceCandidate(candidate)
@@ -216,3 +221,15 @@ def _candidate_summary(sdp: str) -> str:
     types = re.findall(r"^a=candidate:.*?\styp\s+(\w+)", sdp, re.MULTILINE)
     media = re.findall(r"^m=(\w+)", sdp, re.MULTILINE)
     return f"media={','.join(media) or 'none'} candidates={','.join(types) or 'none'}"
+
+
+def _candidate_route(host: str) -> str:
+    """Classify a candidate without exposing its address."""
+    if host.endswith(".local"):
+        return "mdns"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return "hostname"
+    scope = "private" if address.is_private else "public"
+    return f"ipv{address.version}-{scope}"
