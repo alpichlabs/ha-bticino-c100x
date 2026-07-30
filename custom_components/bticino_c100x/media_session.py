@@ -84,6 +84,10 @@ class MediaSession:
         event_type = event.get("event")
         if event_type == "call_state" and event.get("state") == "streams_running":
             self.state = SessionState.STREAMING
+        elif event_type == "call_state" and event.get("state") == "error":
+            self.state = SessionState.ERROR
+            self.microphone_enabled = False
+            self.last_error = "call_error"
         elif event_type == "call_state" and event.get("state") in {"idle", "ended", "released"}:
             self.state = SessionState.IDLE
             self.device_address = None

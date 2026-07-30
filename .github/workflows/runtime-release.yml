@@ -2,6 +2,9 @@ name: Runtime release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "runtime-v*"
 
 permissions:
   contents: write

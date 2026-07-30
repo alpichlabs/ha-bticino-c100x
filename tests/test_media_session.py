@@ -48,3 +48,15 @@ async def test_microphone_cannot_enable_without_stream() -> None:
         await session.set_microphone(True)
 
     runtime.set_microphone.assert_not_awaited()
+
+
+def test_call_error_resets_microphone_and_records_error() -> None:
+    session = MediaSession(MagicMock(), MagicMock())
+    session.state = SessionState.STREAMING
+    session.microphone_enabled = True
+
+    session.handle_event({"event": "call_state", "state": "error"})
+
+    assert session.state == SessionState.ERROR
+    assert session.microphone_enabled is False
+    assert session.last_error == "call_error"
