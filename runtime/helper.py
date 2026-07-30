@@ -38,11 +38,13 @@ class Runtime:
         self.running = True
         self.shutdown_requested = False
         self.core = None
+        self.core_listener = None
         self.call = None
         self.incoming_call = None
         self.incoming_deadline = 0.0
         self.domain: str | None = None
         self.message = None
+        self.message_listener = None
         self.call_callbacks = None
         self.setup_deadline = 0.0
         self.media_deadline = 0.0
@@ -207,6 +209,7 @@ class Runtime:
         callbacks.on_message_received = self._message_received
         core = factory.create_core(None, None, None)
         core.add_listener(callbacks)
+        self.core_listener = callbacks
         core.max_calls = 1
         core.set_user_agent("VctLinphoneService", "1.8.4")
         core.root_ca = request["ca_path"]
@@ -337,6 +340,7 @@ class Runtime:
         callbacks = linphone.Factory.get().create_chat_message_listener()
         callbacks.on_msg_state_changed = self._message_state_changed
         message.add_listener(callbacks)
+        self.message_listener = callbacks
         self.message = message
         message.send()
         self.emit("message_delivery", state="in_progress")
@@ -419,6 +423,7 @@ class Runtime:
             self.emit("message_delivery", state=name)
         if state != linphone.ChatMessageState.ChatMessageStateInProgress:
             self.message = None
+            self.message_listener = None
 
     def _watchdogs(self) -> None:
         now = time.monotonic()
