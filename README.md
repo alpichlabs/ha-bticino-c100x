@@ -35,6 +35,17 @@ registered automatically; add a **BTicino C100X Intercom** card and select the
 camera, Start, End and Release entities. The regular camera entity is also usable
 with Home Assistant's native WebRTC player.
 
+```yaml
+type: custom:bticino-c100x-card
+camera_entity: camera.front_door
+start_entity: button.start_monitoring
+end_entity: button.end_session
+release_entity: button.release_door
+```
+
+The card normally resolves the integration entry from the camera entity. An
+explicit `entry_id` may be supplied for older frontend versions.
+
 Credentials are entered only in Home Assistant. They must never be included in
 issues or diagnostic logs.
 

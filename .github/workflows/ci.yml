@@ -16,6 +16,7 @@ jobs:
       - run: pip install -r requirements_test.txt
       - run: ruff check custom_components runtime tests
       - run: pytest -q
+      - run: node --check custom_components/bticino_c100x/frontend/bticino-c100x-card.js
 
   test-amd64-runtime:
     runs-on: ubuntu-24.04

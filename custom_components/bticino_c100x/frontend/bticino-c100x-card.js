@@ -1,6 +1,6 @@
 class BticinoC100XCard extends HTMLElement {
   setConfig(config) {
-    for (const key of ["entry_id", "camera_entity", "start_entity", "end_entity", "release_entity"]) {
+    for (const key of ["camera_entity", "start_entity", "end_entity", "release_entity"]) {
       if (!config[key]) throw new Error(`Missing ${key}`);
     }
     this.config = config;
@@ -68,7 +68,7 @@ class BticinoC100XCard extends HTMLElement {
     });
     try {
       const result = await this._hass.connection.sendMessagePromise({
-        type: "bticino_c100x/microphone/negotiate", entry_id: this.config.entry_id,
+        type: "bticino_c100x/microphone/negotiate", entry_id: this.entryId,
         owner: this.owner, offer: peer.localDescription.sdp
       });
       await peer.setRemoteDescription({ type: "answer", sdp: result.answer });
@@ -83,7 +83,7 @@ class BticinoC100XCard extends HTMLElement {
     if (!this.peer) return;
     // Server disables Linphone first; browser capture is stopped only after acknowledgement.
     await this._hass.connection.sendMessagePromise({ type: "bticino_c100x/microphone/set",
-      entry_id: this.config.entry_id, owner: this.owner, enabled: false });
+      entry_id: this.entryId, owner: this.owner, enabled: false });
     this.microphoneMedia.getTracks().forEach((track) => track.stop());
     this.peer.close(); this.peer = null; this.microphoneMedia = null;
     this.setStatus("Listen-only · microphone off");
@@ -92,6 +92,12 @@ class BticinoC100XCard extends HTMLElement {
   setStatus(text, error = false) {
     const status = this.shadowRoot.querySelector(".status");
     status.textContent = text; status.style.color = error ? "var(--error-color)" : "";
+  }
+
+  get entryId() {
+    const entryId = this.config.entry_id || this._hass?.entities?.[this.config.camera_entity]?.config_entry_id;
+    if (!entryId) throw new Error("Unable to resolve the BTicino config entry");
+    return entryId;
   }
 
   getCardSize() { return 5; }
