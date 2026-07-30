@@ -62,6 +62,8 @@ class MonitoringOffer:
     address: str
     audio_port: int
     video_port: int
+    advertised_audio_port: int
+    advertised_video_port: int
     audio_crypto: CryptoAttribute
     video_crypto: CryptoAttribute
 
@@ -81,11 +83,23 @@ def new_crypto() -> CryptoAttribute:
 
 
 def build_monitoring_offer(
-    *, address: str, audio_port: int, video_port: int, device_address: str
+    *,
+    address: str,
+    audio_port: int,
+    video_port: int,
+    device_address: str,
+    advertised_audio_port: int | None = None,
+    advertised_audio_rtcp_port: int | None = None,
+    advertised_video_port: int | None = None,
+    advertised_video_rtcp_port: int | None = None,
 ) -> MonitoringOffer:
     """Build the verified Classe 100X monitoring shape with mandatory SRTP."""
     audio_crypto = new_crypto()
     video_crypto = new_crypto()
+    public_audio = advertised_audio_port or audio_port
+    public_audio_rtcp = advertised_audio_rtcp_port or public_audio + 1
+    public_video = advertised_video_port or video_port
+    public_video_rtcp = advertised_video_rtcp_port or public_video + 1
     session_id = secrets.randbits(63)
     lines = [
         "v=0",
@@ -94,12 +108,14 @@ def build_monitoring_offer(
         f"c=IN IP4 {address}",
         "t=0 0",
         f"a=DEVADDR:{device_address}",
-        f"m=audio {audio_port} RTP/SAVP 8 0",
+        f"m=audio {public_audio} RTP/SAVP 8 0",
+        f"a=rtcp:{public_audio_rtcp} IN IP4 {address}",
         "a=rtpmap:8 PCMA/8000",
         "a=rtpmap:0 PCMU/8000",
         "a=sendrecv",
         f"a=crypto:1 {SRTP_SUITE} inline:{audio_crypto.inline}",
-        f"m=video {video_port} RTP/SAVP 96",
+        f"m=video {public_video} RTP/SAVP 96",
+        f"a=rtcp:{public_video_rtcp} IN IP4 {address}",
         "a=rtpmap:96 H264/90000",
         "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
         "a=recvonly",
@@ -110,6 +126,8 @@ def build_monitoring_offer(
         address=address,
         audio_port=audio_port,
         video_port=video_port,
+        advertised_audio_port=public_audio,
+        advertised_video_port=public_video,
         audio_crypto=audio_crypto,
         video_crypto=video_crypto,
     )

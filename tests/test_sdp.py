@@ -73,6 +73,27 @@ def test_answer_is_validated_and_receive_sdp_uses_peer_keys() -> None:
     assert offer.video_crypto.inline not in receive
 
 
+def test_offer_advertises_nat_ports_but_receiver_uses_local_ports() -> None:
+    offer = build_monitoring_offer(
+        address="203.0.113.10",
+        audio_port=41000,
+        video_port=42000,
+        advertised_audio_port=51000,
+        advertised_audio_rtcp_port=51005,
+        advertised_video_port=52000,
+        advertised_video_rtcp_port=52005,
+        device_address="eu",
+    )
+    assert "m=audio 51000 RTP/SAVP" in offer.sdp
+    assert "a=rtcp:51005 IN IP4 203.0.113.10" in offer.sdp
+    assert "m=video 52000 RTP/SAVP" in offer.sdp
+    assert "a=rtcp:52005 IN IP4 203.0.113.10" in offer.sdp
+
+    session = parse_answer(_answer(bytes(30), bytes(30)), offer)
+    receive = build_receive_sdp(session, include_audio=False)
+    assert "m=video 42000 RTP/SAVP" in receive
+
+
 def test_answer_rejects_unencrypted_rtp() -> None:
     offer = build_monitoring_offer(
         address="203.0.113.10",

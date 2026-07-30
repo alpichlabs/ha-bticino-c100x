@@ -37,6 +37,11 @@ registered automatically; add a **BTicino C100X Intercom** card and select the
 camera, Start, End and Release entities. The regular camera entity is also usable
 with Home Assistant's native WebRTC player.
 
+RTP and RTCP endpoints are discovered through the same Linphone STUN service
+used by the vendor app. The integration advertises the mapped endpoints and
+opens symmetric UDP paths before media reception, so Home Assistant Container
+deployments do not expose container-private addresses in the monitoring offer.
+
 ```yaml
 type: custom:bticino-c100x-card
 camera_entity: camera.front_door

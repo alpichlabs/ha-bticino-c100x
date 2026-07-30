@@ -1,12 +1,18 @@
 """Tests for bounded G.711 SRTP media handling."""
 
 import base64
+import socket
+import struct
 from unittest.mock import MagicMock
 
 import pylibsrtp
 from aiortc.rtp import RtpPacket
 
-from custom_components.bticino_c100x.media_runtime import AudioRtpProtocol
+from custom_components.bticino_c100x.media_runtime import (
+    STUN_COOKIE,
+    AudioRtpProtocol,
+    _stun_mapping,
+)
 from custom_components.bticino_c100x.sdp import (
     SRTP_SUITE,
     build_monitoring_offer,
@@ -100,3 +106,25 @@ async def test_received_srtp_is_decrypted_into_pcm_track() -> None:
     assert frame.sample_rate == 8000
     assert frame.pts == 160
     received.assert_called_once_with()
+
+
+def test_stun_mapping_decodes_xor_mapped_ipv4(monkeypatch) -> None:
+    transaction = bytes(range(12))
+    public_address = "203.0.113.27"
+    public_port = 54321
+    encoded_address = struct.unpack("!I", socket.inet_aton(public_address))[0] ^ STUN_COOKIE
+    encoded_port = public_port ^ (STUN_COOKIE >> 16)
+    attribute = struct.pack("!HHBBHI", 0x0020, 8, 0, 1, encoded_port, encoded_address)
+    response = struct.pack("!HHI12s", 0x0101, len(attribute), STUN_COOKIE, transaction) + attribute
+    media_socket = MagicMock()
+    media_socket.gettimeout.return_value = None
+    media_socket.recvfrom.return_value = (response, ("192.0.2.1", 3478))
+    monkeypatch.setattr("secrets.token_bytes", lambda _length: transaction)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_DGRAM, 17, "", ("192.0.2.1", 3478))],
+    )
+
+    assert _stun_mapping(media_socket) == (public_address, public_port)
+    media_socket.sendto.assert_called_once()

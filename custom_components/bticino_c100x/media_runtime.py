@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import secrets
 import socket
+import struct
 import time
 from collections.abc import Awaitable, Callable
 from fractions import Fraction
@@ -17,7 +18,6 @@ import pylibsrtp
 from aiortc import MediaStreamTrack
 from aiortc.rtp import RtpPacket
 
-from .const import SIP_PORT, SIP_SERVER
 from .sdp import (
     Codec,
     NegotiatedSession,
@@ -28,6 +28,8 @@ from .sdp import (
 from .sip import SipClient
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+STUN_SERVER = ("stun.linphone.org", 3478)
+STUN_COOKIE = 0x2112A442
 
 
 class MediaRuntimeError(RuntimeError):
@@ -117,6 +119,11 @@ class AudioRtpProtocol(asyncio.DatagramProtocol):
         )
         self._inbound = pylibsrtp.Session(inbound_policy)
         self._outbound = pylibsrtp.Session(outbound_policy)
+
+    def prime_remote(self) -> None:
+        """Open a symmetric-NAT path without transmitting microphone audio."""
+        if self.transport is not None and self._remote is not None:
+            self.transport.sendto(b"\x00", self._remote)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         if self._inbound is None or self._decoder is None or self._codec is None:
@@ -232,19 +239,38 @@ class MediaRuntime:
             raise MediaRuntimeError("A media session is already active")
         self._ending = False
         self.microphone_enabled = False
-        address = await asyncio.to_thread(_outbound_address)
-        _audio_transport, audio_protocol, rtcp_transport, audio_port = await _bind_audio_pair(
-            self._media_received
+        audio_sockets, audio_port = await asyncio.to_thread(_reserve_even_pair)
+        video_sockets, video_port = await asyncio.to_thread(_reserve_even_pair)
+        try:
+            mappings = await asyncio.to_thread(
+                _discover_media_mappings, audio_sockets + video_sockets
+            )
+        except Exception:
+            for reserved in audio_sockets + video_sockets:
+                reserved.close()
+            raise
+        public_addresses = {item[0] for item in mappings}
+        if len(public_addresses) != 1:
+            for reserved in audio_sockets + video_sockets:
+                reserved.close()
+            raise MediaRuntimeError("STUN returned inconsistent public media addresses")
+        address = public_addresses.pop()
+        _audio_transport, audio_protocol, rtcp_transport = await _bind_audio_pair(
+            self._media_received, audio_sockets
         )
+        audio_sockets = ()
         self.audio = audio_protocol
         self.audio_track = self.audio.track
         self._rtcp_transport = rtcp_transport
-        video_sockets, video_port = await asyncio.to_thread(_reserve_even_pair)
         offer = build_monitoring_offer(
             address=address,
             audio_port=audio_port,
             video_port=video_port,
             device_address=device_address,
+            advertised_audio_port=mappings[0][1],
+            advertised_audio_rtcp_port=mappings[1][1],
+            advertised_video_port=mappings[2][1],
+            advertised_video_rtcp_port=mappings[3][1],
         )
         relay_sockets: tuple[socket.socket, ...] = ()
         try:
@@ -252,6 +278,18 @@ class MediaRuntime:
             session = parse_answer(answer, offer)
             self.negotiated = session
             self.audio.configure(session)
+            self.audio.prime_remote()
+            if session.audio:
+                rtcp_transport.sendto(
+                    b"\x00", (session.audio.connection, session.audio.port + 1)
+                )
+            if session.video:
+                video_sockets[0].sendto(
+                    b"\x00", (session.video.connection, session.video.port)
+                )
+                video_sockets[1].sendto(
+                    b"\x00", (session.video.connection, session.video.port + 1)
+                )
             receive_sdp = build_receive_sdp(session, include_audio=False)
             sdp_path = media_path.with_name("receive-srtp.sdp")
             self._media_path = media_path
@@ -376,7 +414,7 @@ class MediaRuntime:
             while line := await self.process.stderr.readline():
                 clean = _sanitize_ffmpeg_error(line.decode(errors="replace").strip())
                 if clean:
-                    self._ffmpeg_errors = (self._ffmpeg_errors + [clean])[-4:]
+                    self._ffmpeg_errors = [*self._ffmpeg_errors, clean][-4:]
 
         await asyncio.gather(_progress(), _errors())
 
@@ -472,12 +510,52 @@ def _sanitize_ffmpeg_error(value: str) -> str:
     return value
 
 
-def _outbound_address() -> str:
-    candidates = socket.getaddrinfo(SIP_SERVER, SIP_PORT, type=socket.SOCK_DGRAM)
-    family, socktype, proto, _, sockaddr = candidates[0]
-    with socket.socket(family, socktype, proto) as probe:
-        probe.connect(sockaddr)
-        return str(probe.getsockname()[0])
+def _discover_media_mappings(
+    sockets: tuple[socket.socket, ...],
+) -> tuple[tuple[str, int], ...]:
+    """Discover the public UDP endpoint for every RTP/RTCP socket using STUN."""
+    return tuple(_stun_mapping(item) for item in sockets)
+
+
+def _stun_mapping(media_socket: socket.socket) -> tuple[str, int]:
+    candidates = socket.getaddrinfo(
+        STUN_SERVER[0], STUN_SERVER[1], socket.AF_INET, socket.SOCK_DGRAM
+    )
+    transaction = secrets.token_bytes(12)
+    request = struct.pack("!HHI12s", 0x0001, 0, STUN_COOKIE, transaction)
+    previous_timeout = media_socket.gettimeout()
+    try:
+        media_socket.settimeout(3)
+        media_socket.sendto(request, candidates[0][4])
+        response, _source = media_socket.recvfrom(2048)
+    except (OSError, TimeoutError) as err:
+        raise MediaRuntimeError("STUN media discovery failed") from err
+    finally:
+        media_socket.settimeout(previous_timeout)
+    if len(response) < 20:
+        raise MediaRuntimeError("STUN returned a truncated response")
+    message_type, length, cookie, response_transaction = struct.unpack(
+        "!HHI12s", response[:20]
+    )
+    if (
+        message_type != 0x0101
+        or cookie != STUN_COOKIE
+        or response_transaction != transaction
+        or len(response) < 20 + length
+    ):
+        raise MediaRuntimeError("STUN returned an invalid response")
+    offset = 20
+    while offset + 4 <= 20 + length:
+        attribute_type, attribute_length = struct.unpack("!HH", response[offset : offset + 4])
+        value = response[offset + 4 : offset + 4 + attribute_length]
+        if attribute_type == 0x0020 and len(value) >= 8 and value[1] == 0x01:
+            xor_port = struct.unpack("!H", value[2:4])[0]
+            xor_address = struct.unpack("!I", value[4:8])[0]
+            port = xor_port ^ (STUN_COOKIE >> 16)
+            address = socket.inet_ntoa(struct.pack("!I", xor_address ^ STUN_COOKIE))
+            return address, port
+        offset += 4 + ((attribute_length + 3) & ~3)
+    raise MediaRuntimeError("STUN response has no IPv4 mapped address")
 
 
 def _reserve_even_pair() -> tuple[tuple[socket.socket, socket.socket], int]:
@@ -497,28 +575,27 @@ def _reserve_even_pair() -> tuple[tuple[socket.socket, socket.socket], int]:
 
 async def _bind_audio_pair(
     media_received: Callable[[], None],
+    sockets: tuple[socket.socket, socket.socket],
 ) -> tuple[
     asyncio.DatagramTransport,
     AudioRtpProtocol,
     asyncio.DatagramTransport,
-    int,
 ]:
     loop = asyncio.get_running_loop()
-    for _ in range(100):
-        port = secrets.randbelow(10000) * 2 + 40000
-        rtp: asyncio.DatagramTransport | None = None
-        try:
-            rtp, protocol = await loop.create_datagram_endpoint(
-                lambda: AudioRtpProtocol(media_received), local_addr=("0.0.0.0", port)
-            )
-            rtcp, _ = await loop.create_datagram_endpoint(
-                _NullProtocol, local_addr=("0.0.0.0", port + 1)
-            )
-            return rtp, protocol, rtcp, port
-        except OSError:
-            if rtp:
-                rtp.close()
-    raise MediaRuntimeError("No audio RTP port pair is available")
+    rtp: asyncio.DatagramTransport | None = None
+    try:
+        rtp, protocol = await loop.create_datagram_endpoint(
+            lambda: AudioRtpProtocol(media_received), sock=sockets[0]
+        )
+        rtcp, _ = await loop.create_datagram_endpoint(_NullProtocol, sock=sockets[1])
+        return rtp, protocol, rtcp
+    except OSError as err:
+        if rtp:
+            rtp.close()
+        for reserved in sockets:
+            with contextlib.suppress(OSError):
+                reserved.close()
+        raise MediaRuntimeError("Audio RTP socket activation failed") from err
 
 
 def _write_private(path: Path, value: str) -> None:
