@@ -12,6 +12,7 @@ from typing import Any
 
 from aiortc import (
     MediaStreamTrack,
+    RTCBundlePolicy,
     RTCConfiguration,
     RTCIceServer,
     RTCPeerConnection,
@@ -81,11 +82,7 @@ class WebRTCBridge:
     async def answer(self, session_id: str, offer_sdp: str) -> str:
         async with self._lock:
             await self._ensure_player()
-            peer = RTCPeerConnection(
-                RTCConfiguration(
-                    iceServers=[RTCIceServer(urls=list(STUN_URLS))]
-                )
-            )
+            peer = RTCPeerConnection(_rtc_configuration())
             self._peers[session_id] = peer
             self.viewer_changed(1)
 
@@ -221,6 +218,14 @@ def _candidate_summary(sdp: str) -> str:
     types = re.findall(r"^a=candidate:.*?\styp\s+(\w+)", sdp, re.MULTILINE)
     media = re.findall(r"^m=(\w+)", sdp, re.MULTILINE)
     return f"media={','.join(media) or 'none'} candidates={','.join(types) or 'none'}"
+
+
+def _rtc_configuration() -> RTCConfiguration:
+    """Use one NAT mapping for video, received audio and future microphone media."""
+    return RTCConfiguration(
+        iceServers=[RTCIceServer(urls=list(STUN_URLS))],
+        bundlePolicy=RTCBundlePolicy.MAX_BUNDLE,
+    )
 
 
 def _candidate_route(host: str) -> str:
