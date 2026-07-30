@@ -11,7 +11,7 @@ from custom_components.bticino_c100x.webrtc import (
     _candidate_route,
     _rtc_configuration,
 )
-from custom_components.bticino_c100x.webrtc_config import STUN_URLS
+from custom_components.bticino_c100x.webrtc_config import SERVER_STUN_URL, STUN_URLS
 
 
 def test_stun_has_independent_fallback() -> None:
@@ -38,7 +38,7 @@ def test_audio_and_video_share_one_ice_transport() -> None:
     configuration = _rtc_configuration()
 
     assert configuration.bundlePolicy is RTCBundlePolicy.MAX_BUNDLE
-    assert configuration.iceServers[0].urls == list(STUN_URLS)
+    assert configuration.iceServers[0].urls == SERVER_STUN_URL
 
 
 @pytest.mark.asyncio

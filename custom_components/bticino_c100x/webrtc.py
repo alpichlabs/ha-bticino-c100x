@@ -21,7 +21,7 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from .webrtc_config import STUN_URLS
+from .webrtc_config import SERVER_STUN_URL
 
 _LOGGER = logging.getLogger(__name__)
 PLAYER_GRACE_SECONDS = 10
@@ -270,7 +270,7 @@ def _candidate_summary(sdp: str) -> str:
 def _rtc_configuration() -> RTCConfiguration:
     """Use one NAT mapping for video, received audio and future microphone media."""
     return RTCConfiguration(
-        iceServers=[RTCIceServer(urls=list(STUN_URLS))],
+        iceServers=[RTCIceServer(urls=SERVER_STUN_URL)],
         bundlePolicy=RTCBundlePolicy.MAX_BUNDLE,
     )
 

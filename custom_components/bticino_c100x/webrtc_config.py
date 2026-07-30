@@ -7,3 +7,7 @@ STUN_URLS = (
     "stun:stun.cloudflare.com:53",
     "stun:stun.linphone.org:3478",
 )
+
+# aiortc supports only one STUN server even when RTCIceServer contains a list.
+# Use the same service as the vendor Classe 100X app for the VPS-side mapping.
+SERVER_STUN_URL = "stun:stun.linphone.org:3478"
