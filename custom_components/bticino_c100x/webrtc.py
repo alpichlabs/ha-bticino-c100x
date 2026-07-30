@@ -25,6 +25,31 @@ from .webrtc_config import STUN_URLS
 _LOGGER = logging.getLogger(__name__)
 
 
+class _SnapshotTrack(MediaStreamTrack):
+    """Cache an occasional decoded frame without adding queue latency."""
+
+    kind = "video"
+
+    def __init__(self, source: MediaStreamTrack, path: Path) -> None:
+        super().__init__()
+        self.source = source
+        self.path = path
+        self._last_snapshot = 0.0
+        self._snapshot_task: asyncio.Task | None = None
+
+    async def recv(self):
+        frame = await self.source.recv()
+        now = time.monotonic()
+        if now - self._last_snapshot >= 2 and (
+            self._snapshot_task is None or self._snapshot_task.done()
+        ):
+            self._last_snapshot = now
+            self._snapshot_task = asyncio.create_task(
+                asyncio.to_thread(_save_snapshot, frame, self.path)
+            )
+        return frame
+
+
 def _save_snapshot(frame, path: Path) -> None:
     temporary = path.with_suffix(".tmp.jpg")
     frame.to_image().save(temporary, format="JPEG", quality=85)
@@ -44,7 +69,6 @@ class WebRTCBridge:
         self.snapshot_path = snapshot_path
         self._player: MediaPlayer | None = None
         self._video_source: MediaStreamTrack | None = None
-        self._snapshot_task: asyncio.Task | None = None
         self._relay = MediaRelay()
         self._peers: dict[str, RTCPeerConnection] = {}
         self._pending_candidates: dict[str, list[Any]] = {}
@@ -155,10 +179,6 @@ class WebRTCBridge:
             await peer.close()
             self.viewer_changed(-1)
             if not self._peers:
-                if self._snapshot_task:
-                    self._snapshot_task.cancel()
-                    await asyncio.gather(self._snapshot_task, return_exceptions=True)
-                    self._snapshot_task = None
                 if self._player:
                     if self._player.video:
                         self._player.video.stop()
@@ -188,26 +208,12 @@ class WebRTCBridge:
                 )
                 self._video_source = self._player.video
                 if self._video_source and self.snapshot_path:
-                    self._snapshot_task = asyncio.create_task(
-                        self._snapshot_loop(self._video_source, self.snapshot_path)
+                    self._video_source = _SnapshotTrack(
+                        self._video_source, self.snapshot_path
                     )
                 return
             await asyncio.sleep(0.1)
         raise RuntimeError("Media channel did not become ready")
-
-    async def _snapshot_loop(self, source: MediaStreamTrack, path: Path) -> None:
-        """Keep HTTPS fallback frames fresh even while ICE is still checking."""
-        track = self._relay.subscribe(source, buffered=False)
-        last_snapshot = 0.0
-        try:
-            while True:
-                frame = await track.recv()
-                now = time.monotonic()
-                if now - last_snapshot >= 0.5:
-                    last_snapshot = now
-                    await asyncio.to_thread(_save_snapshot, frame, path)
-        finally:
-            track.stop()
 
 
 def _candidate_summary(sdp: str) -> str:

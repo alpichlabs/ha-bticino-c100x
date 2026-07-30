@@ -20,9 +20,7 @@ class BticinoC100XCard extends HTMLElement {
   render() {
     this.shadowRoot.innerHTML = `
       <style>
-        ha-card { overflow:hidden; } .media { background:#111; min-height:240px; position:relative; }
-        .media img { display:block; width:100%; min-height:240px; object-fit:contain; }
-        .transport { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+        ha-card { overflow:hidden; } .media { background:#111; min-height:240px; }
         .controls { display:flex; gap:8px; padding:12px; flex-wrap:wrap; }
         button { border:0; border-radius:18px; padding:9px 14px; cursor:pointer; }
         .release { margin-left:auto; color:var(--error-color); }
@@ -60,32 +58,17 @@ class BticinoC100XCard extends HTMLElement {
   showStream() {
     if (this.stream) return;
     this.stream = document.createElement("ha-camera-stream");
-    this.stream.className = "transport";
-    this.stream.controls = false;
+    this.stream.controls = true;
     this.stream.muted = false;
     this.stream.hass = this._hass;
     this.stream.stateObj = this._hass.states[this.config.camera_entity];
-    const state = this._hass.states[this.config.camera_entity];
-    const token = state?.attributes?.access_token;
-    const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    this.image = document.createElement("img");
-    this.image.alt = "Live front-door video";
-    this.image.src = `/api/camera_proxy_stream/${this.config.camera_entity}${query}`;
-    this.image.addEventListener("load", () =>
-      this.setStatus("Live video over Home Assistant · microphone off"));
-    this.image.addEventListener("error", () =>
-      this.setStatus("Live video connection failed", true));
-    const media = this.shadowRoot.querySelector(".media");
-    media.append(this.stream, this.image);
-    this.setStatus("Connecting live video…");
+    this.shadowRoot.querySelector(".media").append(this.stream);
   }
 
   hideStream() {
     if (!this.stream) return;
     this.stream.remove();
-    this.image?.remove();
     this.stream = null;
-    this.image = null;
   }
 
   disconnectedCallback() {
