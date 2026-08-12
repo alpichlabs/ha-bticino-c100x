@@ -5,6 +5,7 @@ import json
 from custom_components.bticino_c100x.topology import (
     visible_external_units,
     visible_lock_modules,
+    visible_staircase_modules,
 )
 
 
@@ -30,6 +31,20 @@ def test_locks_match_official_visibility_query_and_button_order() -> None:
     ]
 
     assert [item["id"] for item in visible_lock_modules(modules)] == [
+        "first-visible",
+        "second-visible",
+    ]
+
+
+def test_staircases_match_official_visibility_query_and_button_order() -> None:
+    modules = [
+        module("Staircase", "hidden-staircase", 0, "6"),
+        module("Staircase", "second-visible", 1, "2"),
+        module("Staircase", "first-visible", 2, "1"),
+        module("Lock", "visible-lock", 1, "3"),
+    ]
+
+    assert [item["id"] for item in visible_staircase_modules(modules)] == [
         "first-visible",
         "second-visible",
     ]

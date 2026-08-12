@@ -49,6 +49,27 @@ async def test_release_uses_module_id_over_registered_sip(hass) -> None:
     manager._sip.release_door.assert_awaited_once_with("lock-module", "gateway")
 
 
+async def test_staircase_activation_uses_module_id_over_registered_sip(
+    hass,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_GATEWAY_ID: "gateway", CONF_HOME_ID: "home"},
+        unique_id="account",
+    )
+    entry.add_to_hass(hass)
+    api = AsyncMock()
+    manager = C100XManager(hass, entry, AsyncMock(), api)
+    manager._sip = AsyncMock()
+    manager.registered = True
+
+    await manager.async_activate_staircase("staircase-module")
+    manager._sip.activate_staircase.assert_awaited_once_with(
+        "staircase-module",
+        "gateway",
+    )
+
+
 async def test_monitoring_start_records_sanitized_error(hass) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,

@@ -18,9 +18,10 @@ ringing, without modifying the intercom firmware.
 - Keep the official Door Entry app operational through a separate SIP account
 - Expose SIP registration and certificate-expiry diagnostics
 
-Staircase lighting is intentionally not included. There is no architecture-specific
-helper: the integration uses the FFmpeg installation supplied with Home Assistant
-OS and Home Assistant Container.
+Vendor-visible Staircase actions are exposed as momentary buttons. Their actual
+function depends on the installation configuration, for example staircase lighting
+or a gate trigger. There is no architecture-specific helper: the integration uses
+the FFmpeg installation supplied with Home Assistant OS and Home Assistant Container.
 
 ## Installation
 

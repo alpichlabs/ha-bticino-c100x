@@ -32,7 +32,11 @@ from .media_runtime import MediaRuntime, MediaRuntimeError
 from .media_session import MediaSession
 from .models import SipAccount
 from .sip import SipClient, SipError
-from .topology import visible_external_units, visible_lock_modules
+from .topology import (
+    visible_external_units,
+    visible_lock_modules,
+    visible_staircase_modules,
+)
 from .uplink import MicrophoneUplink
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +62,7 @@ class C100XManager:
         self.certificate_expires_at: datetime | None = None
         self.last_error: str | None = None
         self.lock_ids: list[str] = []
+        self.staircase_modules: list[dict[str, Any]] = []
         self.camera_ids: list[str] = []
         self._listeners: set[Callable[[], None]] = set()
         self._ring_listeners: set[Callable[[dict[str, Any]], None]] = set()
@@ -77,6 +82,7 @@ class C100XManager:
     async def async_start(self) -> None:
         modules = await self.api.modules(self.entry.data[CONF_HOME_ID])
         self.lock_ids = [str(module["id"]) for module in visible_lock_modules(modules)]
+        self.staircase_modules = visible_staircase_modules(modules)
         self.camera_ids = [str(module["id"]) for module in visible_external_units(modules)]
         if not self.lock_ids:
             raise SipError("No official-app-visible door release was found")
@@ -112,6 +118,15 @@ class C100XManager:
         if not self._sip or not self.registered:
             raise SipError("Door release is unavailable while SIP is disconnected")
         await self._sip.release_door(lock_id, self.entry.data[CONF_GATEWAY_ID])
+
+    async def async_activate_staircase(self, module_id: str) -> None:
+        if not self._sip or not self.registered:
+            raise SipError(
+                "Staircase activation is unavailable while SIP is disconnected"
+            )
+        await self._sip.activate_staircase(
+            module_id, self.entry.data[CONF_GATEWAY_ID]
+        )
 
     async def async_start_monitoring(self, camera_id: str) -> None:
         if not self.media_session:

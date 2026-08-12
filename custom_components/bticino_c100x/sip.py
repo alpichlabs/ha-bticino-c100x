@@ -292,6 +292,36 @@ class SipClient:
         if response.status_code != 200:
             raise SipError(f"Door release failed with SIP status {response.status_code}")
 
+    async def activate_staircase(
+        self, module_id: str, gateway_id: str
+    ) -> None:
+        """Activate a Classe 100X staircase actuator."""
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": str(secrets.randbelow(2**31)),
+                "method": "light.setStatus",
+                "params": [
+                    {
+                        "status": "on",
+                        "receiver": {"plant": {"coal": {"id": module_id}}},
+                    }
+                ],
+            },
+            separators=(",", ":"),
+        ).encode()
+        gateway_domain = (
+            gateway_id
+            if gateway_id.endswith(".bs.iotleg.com")
+            else f"{gateway_id}.bs.iotleg.com"
+        )
+        uri = f"sip:c100x@{gateway_domain}"
+        response = await self._authenticated_request("MESSAGE", uri, body)
+        if response.status_code != 200:
+            raise SipError(
+                f"Staircase activation failed with SIP status {response.status_code}"
+            )
+
     async def start_monitoring(self, offer_sdp: str) -> bytes:
         """Start one user-initiated monitoring dialog and return its SDP answer."""
         if self._dialog is not None:
