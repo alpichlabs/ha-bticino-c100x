@@ -61,6 +61,17 @@ def visible_lock_modules(modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(locks, key=button_id)
 
 
+def visible_staircase_modules(
+    modules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return every official-app-visible Staircase actuator, ordered by buttonId."""
+    staircases = [
+        module
+        for module in modules
+        if topology_device_type(module) == "staircase" and visible_button(module)
+    ]
+    return sorted(staircases, key=button_id)
+
 def visible_external_units(modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return official-app-visible external units, ordered by buttonId."""
     units = [
