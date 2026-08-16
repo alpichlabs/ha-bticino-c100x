@@ -3,25 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
 
-from aiortc import (
-    MediaStreamTrack,
-    RTCBundlePolicy,
-    RTCConfiguration,
-    RTCIceServer,
-    RTCPeerConnection,
-    RTCSessionDescription,
-)
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from .webrtc_config import SERVER_STUN_URL
+from .webrtc_config import rtc_configuration
 
 _LOGGER = logging.getLogger(__name__)
 PLAYER_GRACE_SECONDS = 10
@@ -88,23 +79,14 @@ class WebRTCBridge:
                 self._cleanup_task.cancel()
                 self._cleanup_task = None
             await self._ensure_player()
-            peer = RTCPeerConnection(_rtc_configuration())
+            peer = RTCPeerConnection(rtc_configuration())
             self._peers[session_id] = peer
             self.viewer_changed(1)
 
             @peer.on("connectionstatechange")
             async def connection_state_changed() -> None:
-                _LOGGER.warning(
-                    "BTicino WebRTC connection state: %s", peer.connectionState
-                )
                 if peer.connectionState in {"failed", "closed", "disconnected"}:
                     await self.close(session_id)
-
-            @peer.on("iceconnectionstatechange")
-            async def ice_connection_state_changed() -> None:
-                _LOGGER.warning(
-                    "BTicino WebRTC ICE state: %s", peer.iceConnectionState
-                )
 
             try:
                 await peer.setRemoteDescription(
@@ -113,9 +95,6 @@ class WebRTCBridge:
                 pending = self._pending_candidates.pop(session_id, [])
                 for candidate in pending:
                     await self._apply_candidate(peer, candidate)
-                _LOGGER.warning(
-                    "BTicino WebRTC browser offer: %s", _candidate_summary(offer_sdp)
-                )
                 assert self._player
                 if self._video_source:
                     peer.addTrack(self._relay.subscribe(self._video_source, buffered=False))
@@ -126,10 +105,6 @@ class WebRTCBridge:
                 answer = await peer.createAnswer()
                 await peer.setLocalDescription(answer)
                 assert peer.localDescription
-                _LOGGER.warning(
-                    "BTicino WebRTC server answer: %s",
-                    _candidate_summary(peer.localDescription.sdp),
-                )
                 return peer.localDescription.sdp
             except Exception:
                 self._peers.pop(session_id, None)
@@ -158,19 +133,9 @@ class WebRTCBridge:
         """Apply one browser ICE candidate after the offer is installed."""
         raw = getattr(value, "candidate", None)
         if not raw:
-            _LOGGER.warning("BTicino WebRTC browser candidates complete")
             await peer.addIceCandidate(None)
             return
-        match = re.search(r"\styp\s+(\w+)", raw)
-        _LOGGER.warning(
-            "BTicino WebRTC browser candidate: %s",
-            match.group(1) if match else "unknown",
-        )
         candidate = candidate_from_sdp(raw.removeprefix("candidate:"))
-        _LOGGER.warning(
-            "BTicino WebRTC browser candidate route: %s",
-            _candidate_route(candidate.ip),
-        )
         candidate.sdpMid = getattr(value, "sdp_mid", None)
         candidate.sdpMLineIndex = getattr(value, "sdp_m_line_index", None)
         await peer.addIceCandidate(candidate)
@@ -258,30 +223,3 @@ class WebRTCBridge:
                 self._player.audio.stop()
         self._player = None
         self._video_source = None
-
-
-def _candidate_summary(sdp: str) -> str:
-    """Describe ICE candidates without logging addresses or credentials."""
-    types = re.findall(r"^a=candidate:.*?\styp\s+(\w+)", sdp, re.MULTILINE)
-    media = re.findall(r"^m=(\w+)", sdp, re.MULTILINE)
-    return f"media={','.join(media) or 'none'} candidates={','.join(types) or 'none'}"
-
-
-def _rtc_configuration() -> RTCConfiguration:
-    """Use one NAT mapping for video, received audio and future microphone media."""
-    return RTCConfiguration(
-        iceServers=[RTCIceServer(urls=SERVER_STUN_URL)],
-        bundlePolicy=RTCBundlePolicy.MAX_BUNDLE,
-    )
-
-
-def _candidate_route(host: str) -> str:
-    """Classify a candidate without exposing its address."""
-    if host.endswith(".local"):
-        return "mdns"
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return "hostname"
-    scope = "private" if address.is_private else "public"
-    return f"ipv{address.version}-{scope}"

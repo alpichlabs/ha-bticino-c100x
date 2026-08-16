@@ -14,6 +14,7 @@ from webrtc_models import RTCConfiguration, RTCIceCandidateInit, RTCIceServer
 
 from . import C100XConfigEntry
 from .entity import C100XEntity
+from .media_session import SessionState
 from .webrtc import WebRTCBridge
 from .webrtc_config import STUN_URLS
 
@@ -54,7 +55,11 @@ class C100XCamera(C100XEntity, Camera):
     @property
     def is_streaming(self) -> bool:
         session = self.manager.media_session
-        return bool(session and session.state == "streaming" and session.device_address == self._camera_id)
+        return bool(
+            session
+            and session.state == SessionState.STREAMING
+            and session.device_address == self._camera_id
+        )
 
     def _async_get_webrtc_client_configuration(self) -> WebRTCClientConfiguration:
         """Give remote browsers a server-reflexive ICE candidate."""
@@ -67,10 +72,17 @@ class C100XCamera(C100XEntity, Camera):
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
     ) -> None:
-        """Treat a live-player offer as an explicit user monitoring action."""
+        """Attach the player only to an explicitly started monitoring session."""
+        session = self.manager.media_session
+        if (
+            session is None
+            or session.device_address != self._camera_id
+            or session.state not in {SessionState.CONNECTING, SessionState.STREAMING}
+        ):
+            raise RuntimeError("Monitoring session is not active")
+
         self._bridge.prepare(session_id)
         try:
-            await self.manager.async_start_monitoring(self._camera_id)
             answer = await self._bridge.answer(session_id, offer_sdp)
             send_message(WebRTCAnswer(answer=answer))
         except Exception:
@@ -92,4 +104,4 @@ class C100XCamera(C100XEntity, Camera):
         if change > 0:
             session.add_viewer()
         else:
-            session.remove_viewer(self.hass.loop)
+            session.remove_viewer()

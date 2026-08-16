@@ -40,7 +40,6 @@ class MediaSession:
         self.media_path = media_path
         self.snapshot_path = snapshot_path
         self._lock = asyncio.Lock()
-        self._viewer_cleanup: asyncio.TimerHandle | None = None
 
     async def start(self, device_address: str) -> None:
         async with self._lock:
@@ -102,24 +101,16 @@ class MediaSession:
         self.notify()
 
     def add_viewer(self) -> None:
-        if self._viewer_cleanup:
-            self._viewer_cleanup.cancel()
-            self._viewer_cleanup = None
+        """Track a WebRTC viewer without taking ownership of the SIP call."""
         self.viewer_count += 1
         self.notify()
 
-    def remove_viewer(self, loop: asyncio.AbstractEventLoop) -> None:
+    def remove_viewer(self) -> None:
+        """Drop a WebRTC viewer without ending user-started monitoring."""
         self.viewer_count = max(0, self.viewer_count - 1)
-        if not self.viewer_count and self.state in {SessionState.CONNECTING, SessionState.STREAMING}:
-            self._viewer_cleanup = loop.call_later(
-                10, lambda: asyncio.create_task(self.end())
-            )
         self.notify()
 
     async def _end_locked(self) -> None:
-        if self._viewer_cleanup:
-            self._viewer_cleanup.cancel()
-            self._viewer_cleanup = None
         if self.state == SessionState.IDLE:
             self.microphone_enabled = False
             return
