@@ -19,7 +19,6 @@ from aiortc import MediaStreamTrack
 from aiortc.rtp import RtpPacket
 
 from .sdp import (
-    Codec,
     NegotiatedSession,
     build_monitoring_offer,
     build_receive_sdp,
