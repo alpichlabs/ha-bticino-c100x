@@ -9,6 +9,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from av.audio.resampler import AudioResampler
 
 from .media_session import MediaSession
+from .webrtc_config import rtc_configuration
 
 
 class MicrophoneUplink:
@@ -29,7 +30,7 @@ class MicrophoneUplink:
             await self._close_locked()
             self.owner = owner
             self._track_ready.clear()
-            peer = RTCPeerConnection()
+            peer = RTCPeerConnection(rtc_configuration())
             self.peer = peer
 
             @peer.on("track")
@@ -59,7 +60,7 @@ class MicrophoneUplink:
 
     async def close(self, owner: str | None = None) -> None:
         async with self._lock:
-            if owner is not None and self.owner != owner:
+            if owner is not None and self.owner is not None and self.owner != owner:
                 raise RuntimeError("Microphone is owned by another client")
             await self._close_locked()
 
@@ -79,8 +80,13 @@ class MicrophoneUplink:
 
     async def _forward(self, track: Any) -> None:
         resampler = AudioResampler(format="s16", layout="mono", rate=8000)
-        while True:
-            frame = await track.recv()
-            for converted in resampler.resample(frame):
-                pcm = bytes(converted.planes[0])[: converted.samples * 2]
-                await self.session.runtime.send_microphone_frame(pcm)
+        try:
+            while True:
+                frame = await track.recv()
+                for converted in resampler.resample(frame):
+                    pcm = bytes(converted.planes[0])[: converted.samples * 2]
+                    await self.session.runtime.send_microphone_frame(pcm)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise

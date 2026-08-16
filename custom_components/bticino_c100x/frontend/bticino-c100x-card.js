@@ -1,10 +1,32 @@
+function createRandomUuid() {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  );
+
+  return [
+    hex.slice(0, 4).join(""),
+    hex.slice(4, 6).join(""),
+    hex.slice(6, 8).join(""),
+    hex.slice(8, 10).join(""),
+    hex.slice(10, 16).join(""),
+  ].join("-");
+}
+
 class BticinoC100XCard extends HTMLElement {
   setConfig(config) {
     for (const key of ["camera_entity", "start_entity", "end_entity", "release_entity"]) {
       if (!config[key]) throw new Error(`Missing ${key}`);
     }
     this.config = config;
-    this.owner = crypto.randomUUID();
+    this.owner = createRandomUuid();
     this.attachShadow({ mode: "open" });
     this.render();
   }
@@ -57,57 +79,24 @@ class BticinoC100XCard extends HTMLElement {
 
   showStream() {
     if (this.stream) return;
-    this.streamGeneration = (this.streamGeneration || 0) + 1;
-    this.streamAttempt = 0;
-    this.startStreamAttempt(this.streamGeneration);
-  }
 
-  startStreamAttempt(generation) {
-    if (generation !== this.streamGeneration) return;
-    this.streamAttempt += 1;
-    this.stream = document.createElement("ha-camera-stream");
-    this.stream.controls = true;
-    this.stream.muted = false;
-    this.stream.hass = this._hass;
-    this.stream.stateObj = this._hass.states[this.config.camera_entity];
-    this.shadowRoot.querySelector(".media").append(this.stream);
-    this.setStatus(`Connecting live media · attempt ${this.streamAttempt}/3`);
-    this.watchStream(this.stream, generation);
-  }
+    const stream = document.createElement("ha-camera-stream");
+    this.stream = stream;
+    stream.controls = true;
+    stream.muted = false;
+    stream.hass = this._hass;
+    stream.stateObj = this._hass.states[this.config.camera_entity];
 
-  async watchStream(stream, generation) {
-    for (let index = 0; index < 24; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      if (generation !== this.streamGeneration || stream !== this.stream) return;
-      const video = this.findVideo(stream);
-      if (video && video.readyState >= 2 && video.videoWidth > 0) {
-        this.setStatus("Live video and received audio · microphone off");
-        return;
-      }
-    }
-    if (generation !== this.streamGeneration || stream !== this.stream) return;
-    stream.remove();
-    this.stream = null;
-    if (this.streamAttempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      this.startStreamAttempt(generation);
-    } else {
-      this.setStatus("Direct media connection failed after 3 attempts", true);
-    }
-  }
+    stream.addEventListener("load", () => {
+      if (stream !== this.stream) return;
+      this.setStatus("Live video and received audio · microphone off");
+    }, { once: true });
 
-  findVideo(root) {
-    const direct = root.shadowRoot?.querySelector("video");
-    if (direct) return direct;
-    for (const element of root.shadowRoot?.querySelectorAll("*") || []) {
-      const nested = element.shadowRoot && this.findVideo(element);
-      if (nested) return nested;
-    }
-    return null;
+    this.shadowRoot.querySelector(".media").append(stream);
+    this.setStatus("Connecting live media");
   }
 
   hideStream() {
-    this.streamGeneration = (this.streamGeneration || 0) + 1;
     if (!this.stream) return;
     this.stream.remove();
     this.stream = null;
@@ -120,7 +109,20 @@ class BticinoC100XCard extends HTMLElement {
 
   async enableMicrophone() {
     // Permission is intentionally requested only from this explicit click.
-    const media = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const mediaDevices = globalThis.navigator?.mediaDevices;
+    const getUserMedia = mediaDevices?.getUserMedia;
+
+    if (typeof getUserMedia !== "function") {
+      throw new Error(
+        `Microphone unavailable: secureContext=${globalThis.isSecureContext}, ` +
+        `mediaDevices=${typeof mediaDevices}, getUserMedia=${typeof getUserMedia}`
+      );
+    }
+
+    const media = await getUserMedia.call(mediaDevices, {
+      audio: true,
+      video: false,
+    });
     const peer = new RTCPeerConnection();
     media.getAudioTracks().forEach((track) => peer.addTrack(track, media));
     await peer.setLocalDescription(await peer.createOffer());

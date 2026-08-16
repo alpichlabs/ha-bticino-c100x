@@ -19,7 +19,6 @@ from aiortc import MediaStreamTrack
 from aiortc.rtp import RtpPacket
 
 from .sdp import (
-    Codec,
     NegotiatedSession,
     build_monitoring_offer,
     build_receive_sdp,
@@ -49,6 +48,7 @@ class AudioReceiveTrack(MediaStreamTrack):
         frame = await self._queue.get()
         if frame is None:
             raise asyncio.CancelledError
+
         return frame
 
     def put(self, frame: av.AudioFrame) -> None:
@@ -77,7 +77,8 @@ class AudioRtpProtocol(asyncio.DatagramProtocol):
         self._outbound: pylibsrtp.Session | None = None
         self._decoder: av.AudioCodecContext | None = None
         self._encoder: av.AudioCodecContext | None = None
-        self._codec: Codec | None = None
+        self._resampler: av.AudioResampler | None = None
+        self._codec = None
         self._remote: tuple[str, int] | None = None
         self._microphone_enabled = False
         self._pcm = bytearray()
@@ -93,18 +94,41 @@ class AudioRtpProtocol(asyncio.DatagramProtocol):
         media = session.audio
         if media is None or media.crypto is None:
             return
-        codec = media.codec({"pcma", "pcmu"})
+        codec = media.codec({"speex", "pcma", "pcmu"})
         if codec is None:
-            raise MediaRuntimeError("No supported negotiated microphone codec")
-        decoder_name = "pcm_alaw" if codec.name.casefold() == "pcma" else "pcm_mulaw"
-        self._decoder = av.CodecContext.create(decoder_name, "r")
-        self._decoder.sample_rate = codec.clock_rate
-        self._decoder.layout = "mono"
-        self._decoder.format = "s16"
-        self._encoder = av.CodecContext.create(decoder_name, "w")
-        self._encoder.sample_rate = codec.clock_rate
-        self._encoder.layout = "mono"
-        self._encoder.format = "s16"
+            raise MediaRuntimeError("No supported negotiated audio codec")
+
+        codec_name = codec.name.casefold()
+
+        if codec_name == "speex":
+            self._decoder = av.CodecContext.create("speex", "r")
+            self._decoder.sample_rate = codec.clock_rate
+            self._decoder.layout = "mono"
+
+            self._encoder = av.CodecContext.create("libspeex", "w")
+            self._encoder.sample_rate = codec.clock_rate
+            self._encoder.layout = "mono"
+            self._encoder.format = "s16"
+        else:
+            decoder_name = "pcm_alaw" if codec_name == "pcma" else "pcm_mulaw"
+
+            self._decoder = av.CodecContext.create(decoder_name, "r")
+            self._decoder.sample_rate = codec.clock_rate
+            self._decoder.layout = "mono"
+            self._decoder.format = "s16"
+
+            self._encoder = av.CodecContext.create(decoder_name, "w")
+            self._encoder.sample_rate = codec.clock_rate
+            self._encoder.layout = "mono"
+            self._encoder.format = "s16"
+
+        # aiortc's Opus encoder requires packed s16 audio.
+        self._resampler = av.AudioResampler(
+            format="s16",
+            layout="mono",
+            rate=codec.clock_rate,
+        )
+
         self._codec = codec
         self._remote = (media.connection, media.port)
         inbound_policy = pylibsrtp.Policy(
@@ -121,24 +145,53 @@ class AudioRtpProtocol(asyncio.DatagramProtocol):
         self._outbound = pylibsrtp.Session(outbound_policy)
 
     def prime_remote(self) -> None:
-        """Open a symmetric-NAT path without transmitting microphone audio."""
+        """Open the remote media path with a STUN binding request."""
         if self.transport is not None and self._remote is not None:
-            self.transport.sendto(b"\x00", self._remote)
+            transaction = secrets.token_bytes(12)
+            request = struct.pack(
+                "!HHI12s",
+                0x0001,
+                0,
+                STUN_COOKIE,
+                transaction,
+            )
+            self.transport.sendto(request, self._remote)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        if self._inbound is None or self._decoder is None or self._codec is None:
+        if (
+            self._inbound is None
+            or self._decoder is None
+            or self._codec is None
+            or self._resampler is None
+        ):
             return
+
+        # Ignore STUN packets used to latch the remote media path.
+        if len(data) < 22:
+            return
+
         try:
             plain = self._inbound.unprotect(data)
+
             packet = RtpPacket.parse(plain)
-            frames = self._decoder.decode(av.Packet(packet.payload))
+
+            decoded_frames = self._decoder.decode(av.Packet(packet.payload))
+            frames: list[av.AudioFrame] = []
+
+            for decoded_frame in decoded_frames:
+                decoded_frame.sample_rate = self._codec.clock_rate
+                decoded_frame.pts = packet.timestamp
+                decoded_frame.time_base = Fraction(1, self._codec.clock_rate)
+                frames.extend(self._resampler.resample(decoded_frame))
+
         except (ValueError, pylibsrtp.Error, av.FFmpegError):
             return
+
         for frame in frames:
             frame.sample_rate = self._codec.clock_rate
-            frame.pts = packet.timestamp
             frame.time_base = Fraction(1, self._codec.clock_rate)
             self.track.put(frame)
+
         if frames:
             self.media_received()
 
@@ -280,8 +333,17 @@ class MediaRuntime:
             self.audio.configure(session)
             self.audio.prime_remote()
             if session.audio:
+                transaction = secrets.token_bytes(12)
+                request = struct.pack(
+                    "!HHI12s",
+                    0x0001,
+                    0,
+                    STUN_COOKIE,
+                    transaction,
+                )
                 rtcp_transport.sendto(
-                    b"\x00", (session.audio.connection, session.audio.port + 1)
+                    request,
+                    (session.audio.connection, session.audio.port + 1),
                 )
             if session.video:
                 video_sockets[0].sendto(
@@ -348,10 +410,9 @@ class MediaRuntime:
                 {
                     "event": "media_format",
                     "video": "H264",
-                    "audio": session.audio.codec({"pcma", "pcmu"}).name
-                    if session.audio and session.audio.codec({"pcma", "pcmu"})
-                    else None,
-                }
+                    "audio": session.audio.codec({"speex", "pcma", "pcmu"}).name
+                    if session.audio and session.audio.codec({"speex", "pcma", "pcmu"})
+                    else None,                }
             )
         except Exception:
             for reserved in video_sockets:
