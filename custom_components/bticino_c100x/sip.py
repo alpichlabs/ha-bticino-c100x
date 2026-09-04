@@ -58,6 +58,7 @@ class SipDialog:
     remote_target: str
     route_set: tuple[str, ...]
     local_sequence: int
+    authorization: tuple[str, str] | None = None
 
 
 def _split_header_values(value: str) -> list[str]:
@@ -354,6 +355,7 @@ class SipClient:
                 remote_target=contact,
                 route_set=routes,
                 local_sequence=int(transaction["sequence"]),
+                authorization=transaction.get("authorization"),
             )
         except KeyError as err:
             raise SipError("Monitoring transaction state was incomplete") from err
@@ -390,6 +392,8 @@ class SipClient:
             f"Contact: <sip:{self.account.username}@{self.account.domain};transport=tls>",
         ]
         headers.extend(f"Route: {route}" for route in dialog.route_set)
+        if method == "ACK" and dialog.authorization:
+            headers.append(f"{dialog.authorization[0]}: {dialog.authorization[1]}")
         headers.append("Content-Length: 0")
         raw = (
             f"{method} {dialog.remote_target} SIP/2.0\r\n"
@@ -537,6 +541,7 @@ class SipClient:
         headers.extend(extra_headers)
         if authorization:
             headers.append(f"{authorization[0]}: {authorization[1]}")
+            transaction["authorization"] = authorization
         headers.append(f"Content-Length: {len(body)}")
         raw = f"{method} {uri} SIP/2.0\r\n" + "\r\n".join(headers) + "\r\n\r\n"
         future = asyncio.get_running_loop().create_future()
@@ -556,11 +561,24 @@ class SipClient:
         while data := await self._reader.read(8192):
             for message in framer.feed(data):
                 if message.status_code is not None:
-                    key = (message.headers.get("call-id", ""), message.headers.get("cseq", ""))
+                    call_id = message.headers.get("call-id", "")
+                    cseq = message.headers.get("cseq", "")
+                    key = (call_id, cseq)
                     # SIP 1xx messages (notably 100 Trying) are provisional.
                     # Keep waiting for the final authentication or success response.
-                    if message.status_code >= 200 and (future := self._pending.get(key)) and not future.done():
+                    if (
+                        message.status_code >= 200
+                        and (future := self._pending.get(key))
+                        and not future.done()
+                    ):
                         future.set_result(message)
+                    elif (
+                        200 <= message.status_code < 300
+                        and self._dialog is not None
+                        and call_id == self._dialog.call_id
+                        and cseq == f"{self._dialog.local_sequence} INVITE"
+                    ):
+                        await self._send_ack(self._dialog)
                 else:
                     await self._handle_request(message)
         raise SipError("SIP server closed the connection")

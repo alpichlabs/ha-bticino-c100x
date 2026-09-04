@@ -145,7 +145,13 @@ class C100XManager:
 
     async def async_end_monitoring(self) -> None:
         if self.microphone_uplink:
-            await self.microphone_uplink.close()
+            try:
+                await self.microphone_uplink.close()
+            except Exception as err:
+                _LOGGER.warning(
+                    "BTicino microphone teardown failed during monitoring end: %s",
+                    type(err).__name__,
+                )
         if self.media_session:
             await self.media_session.end()
 
@@ -266,12 +272,15 @@ class C100XManager:
                 self.last_error = type(err).__name__
             self.registered = False
             self._notify()
+            if self.microphone_uplink:
+                with contextlib.suppress(Exception):
+                    await self.microphone_uplink.close()
+                self.microphone_uplink = None
             if self._runtime:
                 with contextlib.suppress(Exception):
                     await self._runtime.close()
                 self._runtime = None
                 self.media_session = None
-                self.microphone_uplink = None
             if self._sip:
                 with contextlib.suppress(Exception):
                     await self._sip.close()

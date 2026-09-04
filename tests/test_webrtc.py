@@ -6,12 +6,12 @@ from types import SimpleNamespace
 import pytest
 from aiortc import RTCBundlePolicy
 
-from custom_components.bticino_c100x.webrtc import (
-    WebRTCBridge,
-    _candidate_route,
-    _rtc_configuration,
+from custom_components.bticino_c100x.webrtc import WebRTCBridge
+from custom_components.bticino_c100x.webrtc_config import (
+    SERVER_STUN_URL,
+    STUN_URLS,
+    rtc_configuration,
 )
-from custom_components.bticino_c100x.webrtc_config import SERVER_STUN_URL, STUN_URLS
 
 
 def test_stun_has_independent_fallback() -> None:
@@ -22,20 +22,8 @@ def test_stun_has_independent_fallback() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("host", "route"),
-    [
-        ("192.168.1.4", "ipv4-private"),
-        ("2001:4860:4860::8888", "ipv6-public"),
-        ("camera-candidate.local", "mdns"),
-    ],
-)
-def test_candidate_route_is_sanitized(host: str, route: str) -> None:
-    assert _candidate_route(host) == route
-
-
 def test_audio_and_video_share_one_ice_transport() -> None:
-    configuration = _rtc_configuration()
+    configuration = rtc_configuration()
 
     assert configuration.bundlePolicy is RTCBundlePolicy.MAX_BUNDLE
     assert configuration.iceServers[0].urls == SERVER_STUN_URL

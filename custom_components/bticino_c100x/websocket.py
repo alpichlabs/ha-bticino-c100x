@@ -90,7 +90,11 @@ async def ws_microphone_negotiate(hass, connection, msg) -> None:
             raise RuntimeError("Microphone unavailable")
         answer = await uplink.negotiate(msg["owner"], msg["offer"])
     except Exception as error:
-        connection.send_error(msg["id"], "microphone_failed", type(error).__name__)
+        connection.send_error(
+            msg["id"],
+            "microphone_failed",
+            f"{type(error).__name__}: {error}",
+        )
         return
     connection.send_result(msg["id"], {"answer": answer})
 
