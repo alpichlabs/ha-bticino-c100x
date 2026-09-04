@@ -137,7 +137,8 @@ class C100XManager:
             module_id, self.entry.data[CONF_GATEWAY_ID]
         )
 
-    async def async_start_monitoring(self, camera_id: str) -> None:
+    async def async_start_monitoring(self, camera_id: str) -> asyncio.Event:
+        """Start monitoring for a camera and return an Event that fires when STREAMING."""
         if not self.media_session:
             raise SipError("Media runtime is unavailable")
         if camera_id not in self.camera_ids:
@@ -145,7 +146,7 @@ class C100XManager:
         self.last_error = None
         self._notify()
         try:
-            await self.media_session.start(camera_id)
+            return await self.media_session.start(camera_id)
         except Exception as err:
             self.last_error = _diagnostic_error(err)
             _LOGGER.error("BTicino monitoring start failed: %s", self.last_error)

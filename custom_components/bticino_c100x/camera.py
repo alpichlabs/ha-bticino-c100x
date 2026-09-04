@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -103,7 +104,11 @@ class C100XCamera(C100XEntity, Camera):
                 or session.state not in {SessionState.CONNECTING, SessionState.STREAMING}
                 or session.device_address != self._camera_id
             ):
-                await self.manager.async_start_monitoring(self._camera_id)
+                ready_event = await self.manager.async_start_monitoring(self._camera_id)
+                try:
+                    await asyncio.wait_for(ready_event.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass  # Continue with cached snapshot or return None
         except Exception:
             pass  # Will get snapshot from cached file below or return None
 
@@ -132,7 +137,7 @@ class C100XCamera(C100XEntity, Camera):
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
     ) -> None:
-        """Start monitoring if not yet active, then attach WebRTC player."""
+        """Start monitoring if not yet active, wait for streaming, then attach WebRTC."""
         session = self.manager.media_session
         if (
             session is None
@@ -140,7 +145,8 @@ class C100XCamera(C100XEntity, Camera):
             or session.state not in {SessionState.CONNECTING, SessionState.STREAMING}
         ):
             try:
-                await self.manager.async_start_monitoring(self._camera_id)
+                ready_event = await self.manager.async_start_monitoring(self._camera_id)
+                await ready_event.wait()  # Wait until FFmpeg reports STREAMING
             except Exception:
                 raise RuntimeError("Monitoring session is not active")
 

@@ -40,17 +40,21 @@ class MediaSession:
         self.media_path = media_path
         self.snapshot_path = snapshot_path
         self._lock = asyncio.Lock()
+        self._ready_event: asyncio.Event = asyncio.Event()
 
-    async def start(self, device_address: str) -> None:
+    async def start(self, device_address: str) -> asyncio.Event:
+        """Start monitoring and return an Event that fires when STREAMING."""
         async with self._lock:
             if self.state in {SessionState.CONNECTING, SessionState.STREAMING}:
                 if self.device_address == device_address:
-                    return
+                    self._ready_event.set()
+                    return self._ready_event
                 await self._end_locked()
             self.microphone_enabled = False
             self.device_address = device_address
             self.last_error = None
             self.state = SessionState.CONNECTING
+            self._ready_event.clear()
             self.notify()
             try:
                 await self.runtime.set_microphone(False)
@@ -64,8 +68,10 @@ class MediaSession:
                 self.state = SessionState.ERROR
                 self.microphone_enabled = False
                 self.last_error = type(err).__name__
+                self._ready_event.set()
                 self.notify()
                 raise
+            return self._ready_event
 
     async def end(self) -> None:
         async with self._lock:
@@ -83,6 +89,7 @@ class MediaSession:
         event_type = event.get("event")
         if event_type == "call_state" and event.get("state") == "streams_running":
             self.state = SessionState.STREAMING
+            self._ready_event.set()
         elif event_type == "call_state" and event.get("state") == "error":
             self.state = SessionState.ERROR
             self.microphone_enabled = False
