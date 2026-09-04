@@ -95,7 +95,18 @@ class C100XCamera(C100XEntity, Camera):
         self.async_on_remove(self.manager.add_listener(self._async_update_camera_state))
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
-        """Return only a cached frame; snapshots must never initiate a SIP call."""
+        """Return cached frame; auto-start monitoring session if not yet active."""
+        session = self.manager.media_session
+        try:
+            if (
+                session is None
+                or session.state not in {SessionState.CONNECTING, SessionState.STREAMING}
+                or session.device_address != self._camera_id
+            ):
+                await self.manager.async_start_monitoring(self._camera_id)
+        except Exception:
+            pass  # Will get snapshot from cached file below or return None
+
         path = Path(self.manager._material_dir, "snapshot.jpg")
         if not path.is_file():
             return None
@@ -121,14 +132,17 @@ class C100XCamera(C100XEntity, Camera):
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
     ) -> None:
-        """Attach the player only to an explicitly started monitoring session."""
+        """Start monitoring if not yet active, then attach WebRTC player."""
         session = self.manager.media_session
         if (
             session is None
             or session.device_address != self._camera_id
             or session.state not in {SessionState.CONNECTING, SessionState.STREAMING}
         ):
-            raise RuntimeError("Monitoring session is not active")
+            try:
+                await self.manager.async_start_monitoring(self._camera_id)
+            except Exception:
+                raise RuntimeError("Monitoring session is not active")
 
         self._bridge.prepare(session_id)
         try:
