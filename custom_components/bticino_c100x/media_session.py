@@ -110,6 +110,30 @@ class MediaSession:
         self.viewer_count = max(0, self.viewer_count - 1)
         self.notify()
 
+    async def switch_camera(self, camera_id: str) -> None:
+        """Switch to a different camera via re-INVITE without tearing down.
+
+        The SIP dialog, RTP ports, and FFmpeg process stay alive.
+        Only the DEVADDR attribute changes.
+        """
+        async with self._lock:
+            if self.state != SessionState.STREAMING:
+                raise RuntimeError("Camera switch requires an active streaming session")
+            if self.device_address == camera_id:
+                return
+            self.last_error = None
+            self.state = SessionState.CONNECTING
+            self.notify()
+            try:
+                new_session = await self.runtime.switch_camera(camera_id)
+                self.device_address = camera_id
+                self.state = SessionState.STREAMING
+            except Exception as err:
+                self.state = SessionState.ERROR
+                self.last_error = type(err).__name__
+                self.notify()
+                raise
+
     async def _end_locked(self) -> None:
         if self.state == SessionState.IDLE:
             self.microphone_enabled = False

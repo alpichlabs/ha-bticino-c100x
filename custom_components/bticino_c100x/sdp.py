@@ -66,6 +66,16 @@ class MonitoringOffer:
     advertised_video_port: int
     audio_crypto: CryptoAttribute
     video_crypto: CryptoAttribute
+    session_id: int | None = None
+
+
+def extract_devaddr(sdp: str) -> str | None:
+    """Extract the DEVADDR value from an SDP string."""
+    for line in sdp.splitlines():
+        line = line.strip()
+        if line.startswith("a=DEVADDR:"):
+            return line[len("a=DEVADDR:"):]
+    return None
 
 
 @dataclass(slots=True)
@@ -131,6 +141,49 @@ def build_monitoring_offer(
         audio_crypto=audio_crypto,
         video_crypto=video_crypto,
     )
+
+
+def build_reinvite_offer(
+    *,
+    address: str,
+    device_address: str,
+    session_id: int,
+    audio_port: int,
+    video_port: int,
+    advertised_audio_port: int,
+    advertised_audio_rtcp_port: int,
+    advertised_video_port: int,
+    advertised_video_rtcp_port: int,
+    audio_crypto: CryptoAttribute,
+    video_crypto: CryptoAttribute,
+) -> str:
+    """Build an SDP re-INVITE with a new DEVADDR but existing ports/crypto.
+
+    This is used for camera switching: the SIP dialog stays alive and FFmpeg
+    does not need to restart because the underlying RTP ports never change.
+    Only the DEVADDR attribute changes to point at the new external unit.
+    """
+    lines = [
+        "v=0",
+        f"o=- {session_id} {session_id + 1} IN IP4 {address}",
+        "s=BTicino Classe 100X",
+        f"c=IN IP4 {address}",
+        "t=0 0",
+        f"a=DEVADDR:{device_address}",
+        f"m=audio {advertised_audio_port} RTP/SAVP 8 0",
+        f"a=rtcp:{advertised_audio_rtcp_port} IN IP4 {address}",
+        "a=rtpmap:8 PCMA/8000",
+        "a=rtpmap:0 PCMU/8000",
+        "a=sendrecv",
+        f"a=crypto:1 {SRTP_SUITE} inline:{audio_crypto.inline}",
+        f"m=video {advertised_video_port} RTP/SAVP 96",
+        f"a=rtcp:{advertised_video_rtcp_port} IN IP4 {address}",
+        "a=rtpmap:96 H264/90000",
+        "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
+        "a=recvonly",
+        f"a=crypto:1 {SRTP_SUITE} inline:{video_crypto.inline}",
+    ]
+    return "\r\n".join(lines) + "\r\n"
 
 
 def parse_answer(value: bytes | str, offer: MonitoringOffer) -> NegotiatedSession:
