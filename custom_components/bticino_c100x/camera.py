@@ -60,7 +60,6 @@ class C100XCamera(C100XEntity, Camera):
             "name": f"Camera {camera_id}",
             "manufacturer": "BTicino",
             "model": "Classe 100X External Unit",
-            "via_device": (DOMAIN, entry.data["gateway_id"]),
         }
 
         # Register as camera switch listener
