@@ -84,6 +84,15 @@ class C100XManager:
         self.lock_ids = [str(module["id"]) for module in visible_lock_modules(modules)]
         self.staircase_modules = visible_staircase_modules(modules)
         self.camera_ids = [str(module["id"]) for module in visible_external_units(modules)]
+        _LOGGER.info("Detected %d locks: %s", len(self.lock_ids), self.lock_ids)
+        _LOGGER.info("Detected %d cameras (external units): %s", len(self.camera_ids), self.camera_ids)
+        # Log PrivateAddress for each module to correlate with DEVADDR
+        for module in modules:
+            mod_id = module.get("id", "unknown")
+            dev_type = module.get("deviceType", module.get("device", "N/A"))
+            tags = {t.get("key"): t.get("value") for t in module.get("tags", []) if t.get("key") == "PrivateAddress"}
+            if tags:
+                _LOGGER.debug("Module %s (%s): PrivateAddress=%s", mod_id, dev_type, tags.get("PrivateAddress"))
         if not self.lock_ids:
             raise SipError("No official-app-visible door release was found")
         account = await self._prepare_account_and_certificate()
