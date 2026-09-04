@@ -373,6 +373,64 @@ class SipClient:
         if response.status_code not in {200, 481}:
             raise SipError(f"Monitoring teardown failed with SIP status {response.status_code}")
 
+    async def switch_camera(
+        self, camera_id: str, offer_sdp: str
+    ) -> tuple[SipDialog, bytes]:
+        """Re-INVITE with a new DEVADDR to switch camera without tearing down.
+
+        The caller (MediaRuntime) builds the SDP offer with the new camera ID
+        using the same ports and crypto from the existing negotiated session.
+        This method handles only SIP signaling on the active dialog.
+
+        Returns (updated_dialog, sdp_answer_body).
+        """
+        dialog = self._dialog
+        if dialog is None:
+            raise SipError("No active monitoring dialog to switch camera")
+
+        dialog.local_sequence += 1
+        uri = f"sip:c100x@{self.account.domain}"
+
+        # Send re-INVITE with the new SDP offer
+        response = await self._authenticated_request(
+            "INVITE",
+            uri,
+            offer_sdp.encode(),
+            content_type="application/sdp",
+            extra_headers=("Accept: application/sdp",),
+        )
+        if response.status_code != 200:
+            raise SipError(f"Camera switch failed with SIP status {response.status_code}")
+        if "application/sdp" not in response.headers.get("content-type", "").casefold():
+            raise SipError("Camera switch returned no SDP answer")
+
+        # Update dialog tag with new remote-to tag
+        remote_to = response.headers.get("to", "")
+        if ";tag=" not in remote_to.casefold():
+            raise SipError("Camera switch returned no remote dialog tag")
+
+        contact = _first_uri(response.headers.get("contact", "")) or uri
+        routes = tuple(reversed(_split_header_values(response.headers.get("record-route", ""))))
+
+        try:
+            updated_dialog = SipDialog(
+                call_id=dialog.call_id,
+                local_uri=dialog.local_uri,
+                remote_uri=f"sip:c100x@{self.account.domain}",
+                local_tag=dialog.local_tag,
+                remote_to=remote_to,
+                remote_target=contact,
+                route_set=routes,
+                local_sequence=dialog.local_sequence,
+                authorization=dialog.authorization,
+            )
+        except KeyError:
+            raise SipError("Camera switch dialog state was incomplete") from None
+
+        self._dialog = updated_dialog
+        await self._send_ack(updated_dialog)
+        return updated_dialog, response.body
+
     async def _send_ack(self, dialog: SipDialog) -> None:
         await self._dialog_request(dialog, "ACK", dialog.local_sequence, wait=False)
 

@@ -279,6 +279,11 @@ class MediaRuntime:
         self._ending = False
         self._media_path: Path | None = None
         self._sdp_path: Path | None = None
+        # Stun mappings for camera re-INVITE (no longer than needed for re-INVITE)
+        self._mappings: tuple[tuple[str, int], ...] | None = None
+        self._media_address: str | None = None
+        self._audio_port: int | None = None
+        self._video_port: int | None = None
         self.sip.on_call_end = self.remote_ended
 
     async def start_monitoring(
@@ -308,6 +313,11 @@ class MediaRuntime:
                 reserved.close()
             raise MediaRuntimeError("STUN returned inconsistent public media addresses")
         address = public_addresses.pop()
+        # Store stun mapping state for camera switch re-INVITE
+        self._mappings = mappings
+        self._media_address = address
+        self._audio_port = audio_port
+        self._video_port = video_port
         _audio_transport, audio_protocol, rtcp_transport = await _bind_audio_pair(
             self._media_received, audio_sockets
         )
@@ -424,6 +434,65 @@ class MediaRuntime:
 
     async def end_session(self) -> None:
         await self._teardown(send_bye=True)
+
+    async def switch_camera(self, camera_id: str) -> NegotiatedSession:
+        """Re-INVITE with a new DEVADDR to switch camera without tearing down.
+
+        The RTP ports stay the same, FFmpeg keeps running, and the SIP dialog
+        is preserved. Only the DEVADDR attribute changes to point at the new
+        external unit module.
+        """
+        if (
+            self.negotiated is None
+            or self._mappings is None
+            or self._media_address is None
+            or self._audio_port is None
+            or self._video_port is None
+        ):
+            raise MediaRuntimeError("Cannot switch camera: no active media session")
+
+        from .sdp import build_reinvite_offer
+
+        offer_sdp = build_reinvite_offer(
+            address=self._media_address,
+            device_address=camera_id,
+            session_id=self.negotiated.offer.session_id or self.negotiated.offer.sdp.count("o=- "),
+            audio_port=self._audio_port,
+            video_port=self._video_port,
+            advertised_audio_port=self._mappings[0][1],
+            advertised_audio_rtcp_port=self._mappings[1][1],
+            advertised_video_port=self._mappings[2][1],
+            advertised_video_rtcp_port=self._mappings[3][1],
+            audio_crypto=self.negotiated.offer.audio_crypto,
+            video_crypto=self.negotiated.offer.video_crypto,
+        )
+
+        from .sdp import (
+            CryptoAttribute,
+            MonitoringOffer,
+            NegotiatedSession,
+            parse_answer,
+        )
+
+        stored_offer = MonitoringOffer(
+            sdp=offer_sdp,
+            address=self._media_address,
+            audio_port=self._audio_port,
+            video_port=self._video_port,
+            advertised_audio_port=self._mappings[0][1],
+            advertised_video_port=self._mappings[2][1],
+            audio_crypto=self.negotiated.offer.audio_crypto,
+            video_crypto=self.negotiated.offer.video_crypto,
+            session_id=self.negotiated.offer.session_id,
+        )
+
+        # sip.switch_camera now returns (dialog, sdp_answer_body)
+        _dialog, sdp_answer_body = await self.sip.switch_camera(camera_id, offer_sdp)
+
+        session = parse_answer(sdp_answer_body, stored_offer)
+        self.negotiated = session
+        self.audio.configure(session)
+        return session
 
     async def close(self) -> None:
         await self._teardown(send_bye=True)
